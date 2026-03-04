@@ -1,0 +1,218 @@
+isa:
+  name: "ARMv7"
+  encoding: "armv7"
+  word_size: 32
+  registers:
+    - name: "r"
+      count: 16
+      width: 32
+      signed: true
+    - name: "PC"
+      width: 32
+    - name: "CPSR"
+      width: 32
+
+  # ============================================================
+  # ARMv7 Integer Subset
+  # Condition codes are handled by the decoder, not per-instruction.
+  # Each instruction has an unconditional version; the decoder
+  # checks the condition field and skips if not met.
+  # ============================================================
+
+  instructions:
+
+    # --- Data Processing (register) ---
+    - name: "ADD"
+      format: "DP"
+      opcode: 0x4     # bits [24:21]
+      latency: 1
+      behavior:
+        - op: "add"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "SUB"
+      format: "DP"
+      opcode: 0x2
+      latency: 1
+      behavior:
+        - op: "sub"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "AND"
+      format: "DP"
+      opcode: 0x0
+      latency: 1
+      behavior:
+        - op: "and_op"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "ORR"
+      format: "DP"
+      opcode: 0xC
+      latency: 1
+      behavior:
+        - op: "or_op"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "EOR"
+      format: "DP"
+      opcode: 0x1
+      latency: 1
+      behavior:
+        - op: "xor_op"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "MOV"
+      format: "DP"
+      opcode: 0xD
+      latency: 1
+      behavior:
+        - op: "mov"
+          dst: "r[rd]"
+          src: "r[rm]"
+
+    - name: "CMP"
+      format: "DP"
+      opcode: 0xA
+      latency: 1
+      behavior:
+        - op: "cmp"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "LSL"
+      format: "DP"
+      opcode: 0xD
+      funct: 0x0
+      latency: 1
+      behavior:
+        - op: "sll"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "LSR"
+      format: "DP"
+      opcode: 0xD
+      funct: 0x1
+      latency: 1
+      behavior:
+        - op: "srl"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "ASR"
+      format: "DP"
+      opcode: 0xD
+      funct: 0x2
+      latency: 1
+      behavior:
+        - op: "sra"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    # --- Data Processing (immediate) ---
+    - name: "ADD_IMM"
+      format: "DPI"
+      opcode: 0x4
+      latency: 1
+      behavior:
+        - op: "add"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "imm"
+
+    - name: "SUB_IMM"
+      format: "DPI"
+      opcode: 0x2
+      latency: 1
+      behavior:
+        - op: "sub"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "imm"
+
+    - name: "MOV_IMM"
+      format: "DPI"
+      opcode: 0xD
+      latency: 1
+      behavior:
+        - op: "mov"
+          dst: "r[rd]"
+          src: "imm"
+
+    - name: "CMP_IMM"
+      format: "DPI"
+      opcode: 0xA
+      latency: 1
+      behavior:
+        - op: "cmp"
+          src1: "r[rn]"
+          src2: "imm"
+
+    # --- Load/Store ---
+    - name: "LDR"
+      format: "LS"
+      opcode: 0x1     # L bit = 1 (load)
+      latency: 5
+      mem_access: true
+      behavior:
+        - op: "load_word"
+          dst: "r[rd]"
+          base: "r[rn]"
+          offset: "imm"
+
+    - name: "STR"
+      format: "LS"
+      opcode: 0x0     # L bit = 0 (store)
+      latency: 5
+      mem_access: true
+      behavior:
+        - op: "store_word"
+          src: "r[rd]"
+          base: "r[rn]"
+          offset: "imm"
+
+    # --- Branch ---
+    - name: "B"
+      format: "BR"
+      opcode: 0xA
+      latency: 1
+      behavior:
+        - op: "branch"
+          offset: "imm"
+
+    - name: "BL"
+      format: "BR"
+      opcode: 0xB
+      latency: 1
+      behavior:
+        - op: "branch_link"
+          dst: "r[14]"
+          offset: "imm"
+
+    - name: "BX"
+      format: "BX"
+      latency: 1
+      behavior:
+        - op: "branch_reg"
+          base: "r[rm]"
+
+    # --- System ---
+    - name: "SVC"
+      format: "SVC"
+      latency: 1
+      behavior:
+        - op: "ecall"

@@ -1,0 +1,77 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+title: "UADL Architecture Schema"
+type: "object"
+required: ["architecture"]
+properties:
+  architecture:
+    type: "object"
+    required: ["name", "resources", "instructions"]
+    properties:
+      name:
+        type: "string"
+      pipeline:
+        type: "object"
+        properties:
+          enabled: { type: "boolean" }
+          stages: { type: "integer" }
+          forwarding: { type: "boolean" }
+          branch_penalty: { type: "integer" }
+      resources:
+        type: "object"
+        required: ["cores", "registers", "memory"]
+        properties:
+          cores: { type: "integer" }
+          caches:
+            type: "array"
+            items:
+              type: "object"
+              required: ["level", "size", "line_size", "associativity", "hit_latency", "miss_penalty"]
+              properties:
+                level: { type: "string" }
+                size: { type: "integer" }
+                line_size: { type: "integer" }
+                associativity: { type: "integer" }
+                hit_latency: { type: "integer" }
+                miss_penalty: { type: "integer" }
+          registers:
+            type: "array"
+            items:
+              type: "object"
+              required: ["name", "width"]
+              properties:
+                name: { type: "string" }
+                width: { type: "integer" }
+                count: { type: "integer" }
+                initial: { type: "integer" }
+          memory:
+            type: "array"
+            items:
+              type: "object"
+              required: ["name", "size", "width"]
+              properties:
+                name: { type: "string" }
+                size: { type: "integer" }
+                width: { type: "integer" }
+                role: { type: "string", enum: ["instruction", "data"] }
+      instructions:
+        type: "array"
+        items:
+          type: "object"
+          required: ["name", "opcode", "operands", "latency", "type", "behavior"]
+          properties:
+            name: { type: "string" }
+            opcode: { type: "integer" }
+            latency: { type: "integer" }
+            type: { type: "string", enum: ["I", "J", "Z", "R", "RI"] }
+            mem_access: { type: "boolean" }
+            operands:
+              type: "array"
+              items: { type: "string" }
+            behavior:
+              type: "array"
+              items:
+                type: "object"
+                required: ["op"]
+                properties:
+                  op: { type: "string" }
+                additionalProperties: true

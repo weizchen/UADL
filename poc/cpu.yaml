@@ -1,0 +1,237 @@
+architecture:
+  name: "SimpleAccumulator"
+  pipeline:
+    enabled: true
+    stages: 5
+    forwarding: true
+    branch_penalty: 2
+  resources:
+    cores: 1
+    caches:
+      - level: "L1"
+        size: 256
+        line_size: 16
+        associativity: 1
+        hit_latency: 1
+        miss_penalty: 10
+      - level: "L2"
+        size: 1024
+        line_size: 32
+        associativity: 4
+        hit_latency: 5
+        miss_penalty: 50
+    registers:
+      - name: "PC"
+        width: 32
+      - name: "SP"
+        width: 32
+        initial: 4095
+      - name: "R"
+        width: 32
+        count: 8
+    memory:
+      - name: "InstructionMem"
+        size: 4096
+        width: 32
+        role: "instruction"
+      - name: "DataMem"
+        size: 4096
+        width: 32
+        role: "data"
+  instructions:
+    # === Legacy Accumulator Instructions (use R[0] as ACC) ===
+    - name: "LOAD_IMM"
+      type: "I"
+      opcode: 1
+      latency: 1
+      operands: ["imm"]
+      behavior:
+        - op: "set"
+          dst: "ACC"
+          src: "imm"
+
+    - name: "LOAD_MEM"
+      type: "I"
+      opcode: 2
+      latency: 5
+      operands: ["addr"]
+      mem_access: true
+      behavior:
+        - op: "load"
+          dst: "ACC"
+          addr: "addr"
+
+    - name: "STORE"
+      type: "I"
+      opcode: 3
+      latency: 5
+      operands: ["addr"]
+      mem_access: true
+      behavior:
+        - op: "store"
+          src: "ACC"
+          addr: "addr"
+
+    - name: "ADD_IMM"
+      type: "I"
+      opcode: 4
+      latency: 1
+      operands: ["imm"]
+      behavior:
+        - op: "add"
+          dst: "ACC"
+          src1: "ACC"
+          src2: "imm"
+
+    - name: "ADD_MEM"
+      type: "I"
+      opcode: 9
+      latency: 20
+      operands: ["addr"]
+      mem_access: true
+      behavior:
+        - op: "load"
+          dst: "_tmp"
+          addr: "addr"
+        - op: "add"
+          dst: "ACC"
+          src1: "ACC"
+          src2: "_tmp"
+
+    - name: "SUB_IMM"
+      type: "I"
+      opcode: 5
+      latency: 1
+      operands: ["imm"]
+      behavior:
+        - op: "sub"
+          dst: "ACC"
+          src1: "ACC"
+          src2: "imm"
+
+    - name: "MUL_IMM"
+      type: "I"
+      opcode: 12
+      latency: 3
+      operands: ["imm"]
+      behavior:
+        - op: "mul"
+          dst: "ACC"
+          src1: "ACC"
+          src2: "imm"
+
+    # === Control Flow ===
+    - name: "JZ"
+      type: "J"
+      opcode: 6
+      latency: 2
+      operands: ["addr"]
+      behavior:
+        - op: "branch_if_zero"
+          test: "ACC"
+          target: "addr"
+
+    - name: "JMP"
+      type: "J"
+      opcode: 11
+      latency: 1
+      operands: ["addr"]
+      behavior:
+        - op: "jump"
+          target: "addr"
+
+    - name: "JNZ"
+      type: "J"
+      opcode: 8
+      latency: 2
+      operands: ["addr"]
+      behavior:
+        - op: "branch_if_not_zero"
+          test: "ACC"
+          target: "addr"
+
+    - name: "FORK"
+      type: "J"
+      opcode: 10
+      latency: 1
+      operands: ["addr"]
+      behavior:
+        - op: "fork"
+          target: "addr"
+
+    - name: "HALT"
+      type: "Z"
+      opcode: 7
+      latency: 1
+      operands: []
+      behavior:
+        - op: "halt"
+
+    # === Register-Register Instructions (R-type) ===
+    # Encoding: [opcode 8][rd 4][rs1 4][rs2 4][unused 12]
+    - name: "ADD_R"
+      type: "R"
+      opcode: 13
+      latency: 1
+      operands: ["rd", "rs1", "rs2"]
+      behavior:
+        - op: "add"
+          dst: "R[rd]"
+          src1: "R[rs1]"
+          src2: "R[rs2]"
+
+    - name: "SUB_R"
+      type: "R"
+      opcode: 14
+      latency: 1
+      operands: ["rd", "rs1", "rs2"]
+      behavior:
+        - op: "sub"
+          dst: "R[rd]"
+          src1: "R[rs1]"
+          src2: "R[rs2]"
+
+    - name: "MUL_R"
+      type: "R"
+      opcode: 18
+      latency: 3
+      operands: ["rd", "rs1", "rs2"]
+      behavior:
+        - op: "mul"
+          dst: "R[rd]"
+          src1: "R[rs1]"
+          src2: "R[rs2]"
+
+    # === Register-Immediate Instructions (RI-type) ===
+    # Encoding: [opcode 8][reg 4][imm/addr 20]
+    - name: "LOAD_R"
+      type: "RI"
+      opcode: 15
+      latency: 1
+      operands: ["rd", "imm"]
+      behavior:
+        - op: "set"
+          dst: "R[rd]"
+          src: "imm"
+
+    - name: "LOAD_MEM_R"
+      type: "RI"
+      opcode: 16
+      latency: 5
+      operands: ["rd", "addr"]
+      mem_access: true
+      behavior:
+        - op: "load"
+          dst: "R[rd]"
+          addr: "addr"
+
+    - name: "STORE_R"
+      type: "RI"
+      opcode: 17
+      latency: 5
+      operands: ["rs", "addr"]
+      mem_access: true
+      behavior:
+        - op: "store"
+          src: "R[rs]"
+          addr: "addr"

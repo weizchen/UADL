@@ -1,0 +1,100 @@
+{# RISC-V RV32I Decoder — included by sim_template.j2 #}
+
+// === RISC-V RV32I Instruction Decoder ===
+inline int32_t sign_extend(uint32_t val, int bit_width) {
+    uint32_t sign_bit = 1U << (bit_width - 1);
+    return (int32_t)((val ^ sign_bit) - sign_bit);
+}
+
+struct DecodedInst {
+    uint32_t opcode;   // bits [6:0]
+    uint32_t rd;       // bits [11:7]
+    uint32_t funct3;   // bits [14:12]
+    uint32_t rs1;      // bits [19:15]
+    uint32_t rs2;      // bits [24:20]
+    uint32_t funct7;   // bits [31:25]
+    int32_t imm;       // decoded immediate (sign-extended)
+};
+
+DecodedInst decode(uint32_t inst) {
+    DecodedInst d;
+    d.opcode = inst & 0x7F;
+    d.rd     = (inst >> 7) & 0x1F;
+    d.funct3 = (inst >> 12) & 0x7;
+    d.rs1    = (inst >> 15) & 0x1F;
+    d.rs2    = (inst >> 20) & 0x1F;
+    d.funct7 = (inst >> 25) & 0x7F;
+    
+    switch (d.opcode) {
+        case 0x13: case 0x03: case 0x67: case 0x73: // I-type
+            d.imm = sign_extend(inst >> 20, 12);
+            break;
+        case 0x23: // S-type
+            d.imm = sign_extend(((inst >> 25) << 5) | ((inst >> 7) & 0x1F), 12);
+            break;
+        case 0x63: // B-type
+            d.imm = sign_extend(
+                ((inst >> 31) << 12) |
+                (((inst >> 7) & 1) << 11) |
+                (((inst >> 25) & 0x3F) << 5) |
+                (((inst >> 8) & 0xF) << 1),
+                13);
+            break;
+        case 0x37: case 0x17: // U-type
+            d.imm = inst & 0xFFFFF000;
+            break;
+        case 0x6F: // J-type
+            d.imm = sign_extend(
+                ((inst >> 31) << 20) |
+                (((inst >> 12) & 0xFF) << 12) |
+                (((inst >> 20) & 1) << 11) |
+                (((inst >> 21) & 0x3FF) << 1),
+                21);
+            break;
+        default:
+            d.imm = 0;
+            break;
+    }
+    return d;
+}
+
+// Instruction name lookup
+const char* inst_name(uint32_t opcode, uint32_t funct3, uint32_t funct7) {
+    {% for inst in architecture.instructions %}
+    {% if inst.format == 'R' %}
+    if (opcode == {{ inst.opcode }} && funct3 == {{ inst.funct3 }} && funct7 == {{ inst.funct7 }}) return "{{ inst.name }}";
+    {% elif inst.format == 'IR' %}
+    if (opcode == {{ inst.opcode }} && funct3 == {{ inst.funct3 }} && funct7 == {{ inst.funct7 }}) return "{{ inst.name }}";
+    {% elif inst.format in ['I', 'S', 'B'] %}
+    if (opcode == {{ inst.opcode }} && funct3 == {{ inst.funct3 }}) return "{{ inst.name }}";
+    {% elif inst.format in ['U', 'J'] %}
+    if (opcode == {{ inst.opcode }}) return "{{ inst.name }}";
+    {% endif %}
+    {% endfor %}
+    return "???";
+}
+
+{# Decode step in step() function: extract operands #}
+{% macro decode_step() %}
+    DecodedInst d = decode(raw_inst);
+    uint32_t rd = d.rd, rs1 = d.rs1, rs2 = d.rs2;
+    int32_t imm = d.imm;
+{% endmacro %}
+
+{# Dispatch condition for each instruction format #}
+{% macro dispatch_cond(inst, loop) %}
+    {% if inst.format == 'R' %}
+    {% if not loop.first %}else {% endif %}if (d.opcode == {{ inst.opcode }} && d.funct3 == {{ inst.funct3 }} && d.funct7 == {{ inst.funct7 }}) {
+    {% elif inst.format == 'IR' %}
+    {% if not loop.first %}else {% endif %}if (d.opcode == {{ inst.opcode }} && d.funct3 == {{ inst.funct3 }} && d.funct7 == {{ inst.funct7 }}) {
+    {% elif inst.format in ['I', 'S', 'B'] %}
+    {% if not loop.first %}else {% endif %}if (d.opcode == {{ inst.opcode }} && d.funct3 == {{ inst.funct3 }}) {
+    {% elif inst.format in ['U', 'J'] %}
+    {% if not loop.first %}else {% endif %}if (d.opcode == {{ inst.opcode }}) {
+    {% endif %}
+{% endmacro %}
+
+{# Zero register enforcement #}
+{% macro enforce_zero_reg() %}
+        core.x[0] = 0;
+{% endmacro %}

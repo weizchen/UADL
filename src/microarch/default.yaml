@@ -1,0 +1,30 @@
+microarch:
+  pipeline:
+    enabled: true
+    stages: 5
+    forwarding: true
+    branch_penalty: 2
+  resources:
+    cores: 1
+    caches:
+      - level: "L1"
+        size: 256
+        line_size: 16
+        associativity: 1
+        hit_latency: 1
+        miss_penalty: 10
+      - level: "L2"
+        size: 1024
+        line_size: 32
+        associativity: 4
+        hit_latency: 5
+        miss_penalty: 50
+    memory:
+      - name: "InstructionMem"
+        size: 16384
+        width: 8
+        role: "instruction"
+      - name: "DataMem"
+        size: 16384
+        width: 8
+        role: "data"

@@ -1,0 +1,302 @@
+{# ARMv7 Decoder — included by sim_template.j2 #}
+
+// === ARMv7 Instruction Decoder ===
+inline int32_t sign_extend(uint32_t val, int bit_width) {
+    uint32_t sign_bit = 1U << (bit_width - 1);
+    return (int32_t)((val ^ sign_bit) - sign_bit);
+}
+
+// ARM condition codes
+enum ArmCond {
+    COND_EQ = 0, COND_NE = 1, COND_CS = 2, COND_CC = 3,
+    COND_MI = 4, COND_PL = 5, COND_VS = 6, COND_VC = 7,
+    COND_HI = 8, COND_LS = 9, COND_GE = 10, COND_LT = 11,
+    COND_GT = 12, COND_LE = 13, COND_AL = 14
+};
+
+struct DecodedInst {
+    uint32_t cond;
+    uint32_t type_;
+    uint32_t opcode;
+    uint32_t S;
+    uint32_t rd;
+    uint32_t rn;
+    uint32_t rm;
+    uint32_t funct3;
+    uint32_t funct7;
+    uint32_t rs1;
+    uint32_t rs2;
+    int32_t imm;
+    bool is_imm;
+};
+
+// CPSR flags
+uint32_t cpsr_N = 0, cpsr_Z = 0, cpsr_C = 0, cpsr_V = 0;
+
+bool check_condition(uint32_t cond) {
+    switch (cond) {
+        case 0:  return cpsr_Z == 1;           // EQ
+        case 1:  return cpsr_Z == 0;           // NE
+        case 2:  return cpsr_C == 1;           // CS/HS
+        case 3:  return cpsr_C == 0;           // CC/LO
+        case 10: return cpsr_N != cpsr_V;      // LT
+        case 11: return cpsr_N == cpsr_V;      // GE
+        case 12: return !cpsr_Z && (cpsr_N == cpsr_V); // GT
+        case 13: return cpsr_Z || (cpsr_N != cpsr_V);  // LE
+        case 14: return true;                  // AL
+        default: return true;
+    }
+}
+
+// Apply barrel shifter to a register value
+inline int32_t apply_shift(int32_t val, uint32_t shift_type, uint32_t shift_amount) {
+    if (shift_amount == 0) return val;
+    switch (shift_type) {
+        case 0: return val << shift_amount;                          // LSL
+        case 1: return (int32_t)((uint32_t)val >> shift_amount);     // LSR
+        case 2: return val >> shift_amount;                          // ASR
+        default: return val;
+    }
+}
+
+DecodedInst decode(uint32_t inst) {
+    DecodedInst d;
+    d.cond   = (inst >> 28) & 0xF;
+    d.type_  = (inst >> 25) & 0x7;
+    d.opcode = (inst >> 21) & 0xF;
+    d.S      = (inst >> 20) & 1;
+    d.rn     = (inst >> 16) & 0xF;
+    d.rd     = (inst >> 12) & 0xF;
+    d.rm     = inst & 0xF;
+    d.is_imm = (inst >> 25) & 1;
+    
+    d.rs1 = d.rn;
+    d.rs2 = d.rm;
+    d.funct3 = d.opcode;
+    d.funct7 = 0;
+    
+    if ((d.type_ & 0x6) == 0x0) {
+        // Data processing
+        if (d.is_imm) {
+            uint32_t rotate = ((inst >> 8) & 0xF) * 2;
+            uint32_t imm8 = inst & 0xFF;
+            if (rotate == 0) {
+                d.imm = (int32_t)imm8;
+            } else {
+                d.imm = (int32_t)((imm8 >> rotate) | (imm8 << (32 - rotate)));
+            }
+        } else {
+            // Register with optional shift
+            d.imm = 0;
+        }
+    } else if ((d.type_ & 0x6) == 0x2) {
+        // Load/Store (immediate or register offset)
+        if (!d.is_imm) {
+            // type_=010: immediate offset
+            d.imm = inst & 0xFFF;
+            if (!((inst >> 23) & 1)) d.imm = -d.imm;
+        } else {
+            // type_=011: register offset — computed at execution time
+            d.imm = 0;
+        }
+    } else if ((d.type_ & 0x6) == 0x4) {
+        if ((inst >> 25) & 1) {
+            // Branch
+            d.imm = sign_extend((inst & 0xFFFFFF) << 2, 26) + 8;
+        } else {
+            // Block data transfer (LDM/STM)
+            d.imm = inst & 0xFFFF;
+        }
+    } else {
+        d.imm = 0;
+    }
+    
+    return d;
+}
+
+// Instruction name lookup
+const char* inst_name(uint32_t opcode, uint32_t funct3, uint32_t funct7) {
+    {% for inst in architecture.instructions %}
+    {% if inst.format in ['DP', 'DPI'] %}
+    if (funct3 == {{ inst.opcode }}) return "{{ inst.name }}";
+    {% elif inst.format == 'LS' %}
+    if (funct3 == {{ inst.opcode }}) return "{{ inst.name }}";
+    {% elif inst.format in ['BR', 'BX', 'SVC'] %}
+    if (funct3 == {{ inst.opcode|default(0) }}) return "{{ inst.name }}";
+    {% endif %}
+    {% endfor %}
+    return "???";
+}
+
+{# Decode step — handles PUSH/POP, register-offset LDR/STR, MVN, barrel shifter #}
+{% macro decode_step() %}
+    DecodedInst d = decode(raw_inst);
+    uint32_t rd = d.rd, rn = d.rn, rm = d.rm;
+    uint32_t rs1 = d.rn, rs2 = d.rm;
+    int32_t imm = d.imm;
+    
+    // Check condition code
+    if (!check_condition(d.cond)) {
+        return;
+    }
+    
+    // === PUSH (STMDB sp!, {reglist}) ===
+    if ((raw_inst & 0x0FFF0000) == 0x092D0000) {
+        uint32_t reglist = raw_inst & 0xFFFF;
+        for (int i = 15; i >= 0; i--) {
+            if (reglist & (1 << i)) {
+                core.r[13] -= 4;
+                uint32_t addr = (uint32_t)core.r[13];
+                int32_t val = (i == 15) ? (int32_t)core.PC : core.r[i];
+                memcpy(&DataMem[addr], &val, 4);
+            }
+        }
+        {% if architecture._pipeline_enabled %}
+        core.pipeline_cycle++;
+        if (core.pipeline_trace.size() < 30) {
+            core.pipeline_trace.push_back({"PUSH", core.pipeline_cycle - 1, 0});
+        }
+        {% else %}
+        core.total_cycles += 1;
+        {% endif %}
+        return;
+    }
+    // === POP (LDMIA sp!, {reglist}) ===
+    if ((raw_inst & 0x0FFF0000) == 0x08BD0000) {
+        uint32_t reglist = raw_inst & 0xFFFF;
+        bool pop_pc = false;
+        for (int i = 0; i <= 15; i++) {
+            if (reglist & (1 << i)) {
+                uint32_t addr = (uint32_t)core.r[13];
+                int32_t val;
+                memcpy(&val, &DataMem[addr], 4);
+                if (i == 15) {
+                    core.PC = (uint32_t)val;
+                    pop_pc = true;
+                } else {
+                    core.r[i] = val;
+                }
+                core.r[13] += 4;
+            }
+        }
+        {% if architecture._pipeline_enabled %}
+        core.pipeline_cycle++;
+        if (core.pipeline_trace.size() < 30) {
+            core.pipeline_trace.push_back({"POP", core.pipeline_cycle - 1, 0});
+        }
+        if (pop_pc) {
+            core.pipeline_cycle += {{ architecture.pipeline.branch_penalty }};
+            core.flush_count++;
+        }
+        {% else %}
+        core.total_cycles += 1;
+        {% endif %}
+        _branch_taken = pop_pc;
+        return;
+    }
+    
+    // === MVN (data processing, opcode=0xF) ===
+    if ((d.type_ & 0x6) == 0x0 && d.opcode == 0xF) {
+        if (d.is_imm) {
+            core.r[rd] = ~imm;
+        } else {
+            uint32_t shift_type = (raw_inst >> 5) & 0x3;
+            uint32_t shift_amt = (raw_inst >> 7) & 0x1F;
+            core.r[rd] = ~apply_shift(core.r[rm], shift_type, shift_amt);
+        }
+        {% if architecture._pipeline_enabled %}
+        core.pipeline_cycle++;
+        if (core.pipeline_trace.size() < 30) {
+            core.pipeline_trace.push_back({"MVN", core.pipeline_cycle - 1, 0});
+        }
+        {% else %}
+        core.total_cycles += 1;
+        {% endif %}
+        return;
+    }
+    
+    // === LDR/STR with register offset (type_=011) ===
+    if (d.type_ == 0x3) {
+        uint32_t shift_type = (raw_inst >> 5) & 0x3;
+        uint32_t shift_amt = (raw_inst >> 7) & 0x1F;
+        int32_t offset = apply_shift(core.r[rm], shift_type, shift_amt);
+        bool U = (raw_inst >> 23) & 1;
+        bool P = (raw_inst >> 24) & 1;  // pre-index
+        bool W = (raw_inst >> 21) & 1;  // writeback
+        
+        uint32_t base = (uint32_t)core.r[rn];
+        uint32_t addr = U ? (base + (uint32_t)offset) : (base - (uint32_t)offset);
+        
+        if ((raw_inst >> 20) & 1) {
+            // LDR (register offset)
+            int32_t val;
+            memcpy(&val, &DataMem[addr], 4);
+            core.r[rd] = val;
+            _mem_addr = addr;
+            {% if architecture._pipeline_enabled %}
+            core.pipeline_cycle++;
+            if (core.pipeline_trace.size() < 30) {
+                core.pipeline_trace.push_back({"LDR_R", core.pipeline_cycle - 1, 0});
+            }
+            {% else %}
+            core.total_cycles += 5;
+            {% endif %}
+        } else {
+            // STR (register offset)
+            int32_t val = core.r[rd];
+            memcpy(&DataMem[addr], &val, 4);
+            _mem_addr = addr;
+            {% if architecture._pipeline_enabled %}
+            core.pipeline_cycle++;
+            if (core.pipeline_trace.size() < 30) {
+                core.pipeline_trace.push_back({"STR_R", core.pipeline_cycle - 1, 0});
+            }
+            {% else %}
+            core.total_cycles += 5;
+            {% endif %}
+        }
+        // Handle writeback
+        if (W || !P) {
+            core.r[rn] = (int32_t)addr;
+        }
+        return;
+    }
+    
+    // === Data processing with barrel-shifted register operand ===
+    // Temporarily patch r[rm] with shifted value for dispatch
+    // EXCLUDE BX instructions — BX has a unique encoding that looks like DP
+    // but the shift bits are part of the BX encoding, not an actual shift.
+    int32_t _saved_rm = 0;
+    bool _has_shift = false;
+    bool _is_bx = ((raw_inst & 0x0FFFFFF0) == 0x012FFF10);
+    if ((d.type_ & 0x6) == 0x0 && !d.is_imm && !_is_bx) {
+        uint32_t shift_type = (raw_inst >> 5) & 0x3;
+        uint32_t shift_amt = (raw_inst >> 7) & 0x1F;
+        if (shift_amt != 0) {
+            _saved_rm = core.r[rm];
+            core.r[rm] = apply_shift(_saved_rm, shift_type, shift_amt);
+            _has_shift = true;
+        }
+    }
+{% endmacro %}
+
+{# Dispatch condition for each ARM instruction format #}
+{% macro dispatch_cond(inst, loop) %}
+    {% if inst.format == 'DP' %}
+    {% if not loop.first %}else {% endif %}if ((d.type_ & 0x6) == 0x0 && !d.is_imm && d.opcode == {{ inst.opcode }}{% if inst.funct is defined %} && ((raw_inst >> 5) & 0x3) == {{ inst.funct }}{% endif %}) {
+    {% elif inst.format == 'DPI' %}
+    {% if not loop.first %}else {% endif %}if ((d.type_ & 0x6) == 0x0 && d.is_imm && d.opcode == {{ inst.opcode }}) {
+    {% elif inst.format == 'LS' %}
+    {% if not loop.first %}else {% endif %}if ((d.type_ & 0x6) == 0x2 && !d.is_imm && ((raw_inst >> 20) & 1) == {{ inst.opcode }}) {
+    {% elif inst.format == 'BR' %}
+    {% if not loop.first %}else {% endif %}if ((d.type_ & 0x6) == 0x4 && ((raw_inst >> 24) & 0xF) == {{ inst.opcode }}) {
+    {% elif inst.format == 'BX' %}
+    {% if not loop.first %}else {% endif %}if ((raw_inst & 0x0FFFFFF0) == 0x012FFF10) {
+    {% elif inst.format == 'SVC' %}
+    {% if not loop.first %}else {% endif %}if ((raw_inst & 0x0F000000) == 0x0F000000) {
+    {% endif %}
+{% endmacro %}
+
+{# ARM has no zero register to enforce #}
+{% macro enforce_zero_reg() %}
+{% endmacro %}

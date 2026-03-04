@@ -1,0 +1,391 @@
+#include <iostream>
+#include <vector>
+#include <cstdint>
+#include <fstream>
+#include <cstring>
+#include <algorithm>
+
+using namespace std;
+
+// --- Architecture Resources ---
+int NUM_CORES = {{ architecture.resources.cores }};
+
+// --- Cache Hierarchy (Tag-Based, Deterministic) ---
+{% for cache in architecture.resources.caches %}
+struct {{ cache.level }}_Cache {
+    static const int SIZE = {{ cache.size }};
+    static const int LINE_SIZE = {{ cache.line_size }};
+    static const int ASSOCIATIVITY = {{ cache.associativity }};
+    static const int NUM_SETS = {{ cache.size // (cache.line_size * cache.associativity) }};
+    static const int HIT_LATENCY = {{ cache.hit_latency }};
+    static const int MISS_PENALTY = {{ cache.miss_penalty }};
+    
+    uint32_t tags[NUM_SETS][ASSOCIATIVITY];
+    bool valid[NUM_SETS][ASSOCIATIVITY];
+    int lru_counter[NUM_SETS][ASSOCIATIVITY];
+    int access_count;
+    int hit_count;
+    int miss_count;
+    
+    {{ cache.level }}_Cache() : access_count(0), hit_count(0), miss_count(0) {
+        memset(valid, 0, sizeof(valid));
+        memset(tags, 0, sizeof(tags));
+        memset(lru_counter, 0, sizeof(lru_counter));
+    }
+    
+    int access(uint32_t addr) {
+        access_count++;
+        uint32_t line_addr = addr / LINE_SIZE;
+        uint32_t set_idx = line_addr % NUM_SETS;
+        uint32_t tag = line_addr / NUM_SETS;
+        
+        for (int w = 0; w < ASSOCIATIVITY; w++) {
+            if (valid[set_idx][w] && tags[set_idx][w] == tag) {
+                hit_count++;
+                lru_counter[set_idx][w] = access_count;
+                return HIT_LATENCY;
+            }
+        }
+        
+        miss_count++;
+        int victim = 0;
+        int min_lru = lru_counter[set_idx][0];
+        for (int w = 0; w < ASSOCIATIVITY; w++) {
+            if (!valid[set_idx][w]) { victim = w; break; }
+            if (lru_counter[set_idx][w] < min_lru) {
+                min_lru = lru_counter[set_idx][w];
+                victim = w;
+            }
+        }
+        
+        valid[set_idx][victim] = true;
+        tags[set_idx][victim] = tag;
+        lru_counter[set_idx][victim] = access_count;
+        return HIT_LATENCY + MISS_PENALTY;
+    }
+};
+{{ cache.level }}_Cache cache_{{ cache.level }};
+{% endfor %}
+
+{% if architecture._pipeline_enabled %}
+struct PipelineTraceEntry {
+    const char* name;
+    int if_cycle;
+    int stall;
+};
+{% endif %}
+
+int simulate_memory_access(uint32_t addr) {
+    int total = 0;
+    {% for cache in architecture.resources.caches %}
+    {
+        int result = cache_{{ cache.level }}.access(addr);
+        total += result;
+        if (result == {{ cache.level }}_Cache::HIT_LATENCY) {
+            return total;
+        }
+    }
+    {% endfor %}
+    return total;
+}
+
+struct CoreState {
+    int core_id;
+    bool halt;
+    uint64_t total_cycles;
+    
+    {% for reg in architecture.resources.registers %}
+    {% if reg.count is defined %}
+    uint{{ reg.width }}_t {{ reg.name }}[{{ reg.count }}];
+    {% else %}
+    uint{{ reg.width }}_t {{ reg.name }};
+    {% endif %}
+    {% endfor %}
+    
+    {% if architecture._pipeline_enabled %}
+    // Pipeline scoreboard state
+    int pipeline_cycle;
+    int reg_available_at[8];
+    int stall_cycles;
+    int flush_count;
+    vector<PipelineTraceEntry> pipeline_trace;
+    {% endif %}
+    
+    CoreState(int id) : core_id(id), halt(false), total_cycles(0) {
+        {% for reg in architecture.resources.registers %}
+        {% if reg.count is defined %}
+        for (int _i = 0; _i < {{ reg.count }}; _i++) {{ reg.name }}[_i] = 0;
+        {% elif reg.initial is defined %}
+        {{ reg.name }} = {{ reg.initial }};
+        {% else %}
+        {{ reg.name }} = 0;
+        {% endif %}
+        {% endfor %}
+        {% if architecture._pipeline_enabled %}
+        pipeline_cycle = 0;
+        memset(reg_available_at, 0, sizeof(reg_available_at));
+        stall_cycles = 0;
+        flush_count = 0;
+        {% endif %}
+    }
+    
+    {% if architecture._pipeline_enabled %}
+    void reset_pipeline() {
+        memset(reg_available_at, 0, sizeof(reg_available_at));
+        // Don't reset pipeline_cycle — it represents wall-clock time
+    }
+    {% endif %}
+};
+
+vector<CoreState> cores;
+vector<uint32_t> thread_queue;
+
+// --- Memory Address Spaces (Harvard Architecture) ---
+{% for mem in architecture.resources.memory %}
+vector<uint{{ mem.width }}_t> {{ mem.name }}({{ mem.size }}, 0);
+{% endfor %}
+
+// --- Instruction Decoding & Execution ---
+void step(CoreState& core) {
+    if (core.halt) return;
+    
+    bool _branch_taken = false;
+    
+    // Fetch from Instruction Memory
+    uint32_t current_pc = core.PC;
+    uint32_t instruction = InstructionMem[current_pc];
+    
+    // Increment PC (baseline)
+    core.PC++;
+
+    // Decode 
+    uint8_t opcode = instruction >> 24;
+    uint32_t operand = instruction & 0x00FFFFFF;
+
+    // Execute
+    switch (opcode) {
+        {% for inst in architecture.instructions %}
+        case {{ inst.opcode }}: {
+            // {{ inst.name }}
+            {% if inst.type == 'I' or inst.type == 'J' %}
+            uint32_t {{ inst.operands[0] }} = operand;
+            {% elif inst.type == 'R' %}
+            uint32_t {{ inst.operands[0] }} = (operand >> 20) & 0xF;
+            uint32_t {{ inst.operands[1] }} = (operand >> 16) & 0xF;
+            uint32_t {{ inst.operands[2] }} = (operand >> 12) & 0xF;
+            {% elif inst.type == 'RI' %}
+            uint32_t {{ inst.operands[0] }} = (operand >> 20) & 0xF;
+            uint32_t {{ inst.operands[1] }} = operand & 0xFFFFF;
+            {% endif %}
+            
+            {% if architecture._pipeline_enabled %}
+            // Pipeline: check source register availability (stall if hazard)
+            {
+                int _src_avail = 0;
+                {% for src_idx in inst._pipeline.src_indices %}
+                _src_avail = max(_src_avail, core.reg_available_at[{{ src_idx }}]);
+                {% endfor %}
+                int _if_cycle = core.pipeline_cycle;
+                int _stall = 0;
+                if (_src_avail > core.pipeline_cycle) {
+                    _stall = _src_avail - core.pipeline_cycle;
+                    core.stall_cycles += _stall;
+                    core.pipeline_cycle = _src_avail;
+                }
+                core.pipeline_cycle++;
+                if (core.pipeline_trace.size() < 20) {
+                    core.pipeline_trace.push_back({"{{ inst.name }}", _if_cycle, _stall});
+                }
+            }
+            {% else %}
+            core.total_cycles += {{ inst.latency }};
+            {% endif %}
+            
+            // Behavior (generated from micro-op IR)
+{{ inst._generated_cpp }}
+            
+            {% if architecture._pipeline_enabled %}
+            // Pipeline: update destination register availability
+            {% if inst._pipeline.dst_index is not none %}
+            {% if inst._pipeline.is_load %}
+            // Load-use hazard: result available 2 cycles after issue
+            {% if architecture.pipeline.forwarding %}
+            core.reg_available_at[{{ inst._pipeline.dst_index }}] = core.pipeline_cycle + 1;
+            {% else %}
+            core.reg_available_at[{{ inst._pipeline.dst_index }}] = core.pipeline_cycle + 2;
+            {% endif %}
+            {% else %}
+            // ALU result: available next cycle (with forwarding) or +2 (without)
+            {% if architecture.pipeline.forwarding %}
+            core.reg_available_at[{{ inst._pipeline.dst_index }}] = core.pipeline_cycle;
+            {% else %}
+            core.reg_available_at[{{ inst._pipeline.dst_index }}] = core.pipeline_cycle + 2;
+            {% endif %}
+            {% endif %}
+            {% endif %}
+            {% endif %}
+            
+            // Cache emulation for memory instructions
+            {% if inst.get('mem_access', false) %}
+            {% if architecture._pipeline_enabled %}
+            core.pipeline_cycle += simulate_memory_access(addr);
+            {% else %}
+            core.total_cycles += simulate_memory_access(addr);
+            {% endif %}
+            {% endif %}
+            break;
+        }
+        {% endfor %}
+        default:
+            cerr << "Unknown opcode: " << (int)opcode << " at PC " << current_pc << " on core " << core.core_id << endl;
+            core.halt = true;
+            break;
+    }
+    
+    {% if architecture._pipeline_enabled %}
+    // Pipeline: branch penalty (flush)
+    if (_branch_taken) {
+        core.pipeline_cycle += {{ architecture.pipeline.branch_penalty }};
+        core.flush_count++;
+    }
+    {% endif %}
+}
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        cerr << "Usage: " << argv[0] << " <binary_file>" << endl;
+        return 1;
+    }
+
+    // Load binary into Instruction Memory
+    ifstream binfile(argv[1], ios::binary);
+    if (!binfile) {
+        cerr << "Error opening file " << argv[1] << endl;
+        return 1;
+    }
+    
+    uint32_t inst;
+    int i = 0;
+    while (binfile.read(reinterpret_cast<char*>(&inst), sizeof(inst))) {
+        if (i < InstructionMem.size()) {
+            InstructionMem[i] = inst;
+            i++;
+        }
+    }
+
+    // Init Cores
+    for (int c = 0; c < NUM_CORES; c++) {
+        cores.push_back(CoreState(c));
+        cores[c].halt = true;
+    }
+
+    // Boot the main program as the first thread
+    thread_queue.push_back(0);
+
+    // Execution loop: Round Robin Interleaved Emulation
+    bool active_work = true;
+    while (active_work) {
+        active_work = false;
+        
+        for (int c = 0; c < NUM_CORES; c++) {
+            if (cores[c].halt && !thread_queue.empty()) {
+                cores[c].PC = thread_queue.front();
+                thread_queue.erase(thread_queue.begin());
+                cores[c].halt = false;
+                {% if architecture._pipeline_enabled %}
+                cores[c].reset_pipeline();
+                {% endif %}
+            }
+            
+            if (!cores[c].halt) {
+                active_work = true;
+                step(cores[c]);
+            }
+        }
+    }
+
+    // Dump state
+    uint64_t max_cycles = 0;
+    cout << "--- Final CPU State ---" << endl;
+    for (int c = 0; c < NUM_CORES; c++) {
+        {% if architecture._pipeline_enabled %}
+        cores[c].total_cycles = cores[c].pipeline_cycle;
+        {% endif %}
+        cout << "[Core " << c << "]" << endl;
+        {% for reg in architecture.resources.registers %}
+        {% if reg.count is defined %}
+        for (int _r = 0; _r < {{ reg.count }}; _r++) {
+            cout << "  {{ reg.name }}[" << _r << "]: " << cores[c].{{ reg.name }}[_r] << endl;
+        }
+        {% else %}
+        cout << "  {{ reg.name }}: " << cores[c].{{ reg.name }} << endl;
+        {% endif %}
+        {% endfor %}
+        cout << "  Total Cycles: " << cores[c].total_cycles << endl;
+        {% if architecture._pipeline_enabled %}
+        cout << "  Pipeline Stalls: " << cores[c].stall_cycles << endl;
+        cout << "  Pipeline Flushes: " << cores[c].flush_count << endl;
+        {% endif %}
+        if (cores[c].total_cycles > max_cycles) {
+            max_cycles = cores[c].total_cycles;
+        }
+    }
+    cout << "--- Performance Data ---" << endl;
+    cout << "Total Workload Cycles: " << max_cycles << endl;
+    {% for cache in architecture.resources.caches %}
+    cout << "{{ cache.level }} Cache: " << cache_{{ cache.level }}.hit_count << " hits, " << cache_{{ cache.level }}.miss_count << " misses (" 
+         << (cache_{{ cache.level }}.access_count > 0 ? (100.0 * cache_{{ cache.level }}.hit_count / cache_{{ cache.level }}.access_count) : 0) 
+         << "% hit rate)" << endl;
+    {% endfor %}
+    cout << "--- Data Memory Dump ---" << endl;
+    for(int j=0; j<256; j++) {
+        if(DataMem[j] != 0) {
+            cout << "DataMem[" << j << "]: " << DataMem[j] << endl;
+        }
+    }
+    
+    {% if architecture._pipeline_enabled %}
+    // Pipeline Diagram
+    if (!cores[0].pipeline_trace.empty()) {
+        cout << "--- Pipeline Diagram ---" << endl;
+        int _max_c = 0;
+        for (auto& e : cores[0].pipeline_trace) {
+            int wb = e.if_cycle + e.stall + 5;
+            if (wb > _max_c) _max_c = wb;
+        }
+        if (_max_c > 30) _max_c = 30;
+        
+        // Header
+        printf("%-14s", "Instruction");
+        for (int c = 0; c < _max_c; c++) printf("%3d ", c + 1);
+        printf("\n");
+        printf("%-14s", "--------------");
+        for (int c = 0; c < _max_c; c++) printf("----");
+        printf("\n");
+        
+        // Rows
+        for (auto& e : cores[0].pipeline_trace) {
+            printf("%-14s", e.name);
+            for (int c = 0; c < _max_c; c++) {
+                if (c == e.if_cycle)
+                    printf(" IF ");
+                else if (c == e.if_cycle + 1)
+                    printf(" ID ");
+                else if (e.stall > 0 && c > e.if_cycle + 1 && c <= e.if_cycle + 1 + e.stall)
+                    printf(" ** ");
+                else if (c == e.if_cycle + 2 + e.stall)
+                    printf(" EX ");
+                else if (c == e.if_cycle + 3 + e.stall)
+                    printf(" ME ");
+                else if (c == e.if_cycle + 4 + e.stall)
+                    printf(" WB ");
+                else
+                    printf("    ");
+            }
+            printf("\n");
+        }
+    }
+    {% endif %}
+
+    return 0;
+}
