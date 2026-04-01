@@ -1,0 +1,82 @@
+
+
+
+================================================================================
+PHASE C EXPERIMENT RESULTS
+================================================================================
+
+--- MATMUL ---
+Variant              Arch       Cycles   Stalls  Flushes    Insns      IPC
+------------------------------------------------------------------------------
+baseline             large       34523        0     4036        0    0.000
+naive_llm            large        7410        0      676        0    0.000
+uadl_aware_llm       large        5363        0      434        0    0.000
+baseline             small       57452    10343     4036        0    0.000
+naive_llm            small       15781     2487      676        0    0.000
+uadl_aware_llm       small       10493     1092      434        0    0.000
+
+  Speedup vs baseline (small):
+    naive_llm: 3.64x
+    uadl_aware_llm: 5.48x
+
+  Speedup vs baseline (large):
+    naive_llm: 4.66x
+    uadl_aware_llm: 6.44x
+
+
+
+
+--- SORT ---
+Variant              Arch       Cycles   Stalls  Flushes    Insns      IPC
+------------------------------------------------------------------------------
+baseline             large         819        0       67        0    0.000
+naive_llm            large        1010        0       69        0    0.000
+uadl_aware_llm       large        1008        0       69        0    0.000
+baseline             small        1206      297       67        0    0.000
+naive_llm            small        1465      367       69        0    0.000
+uadl_aware_llm       small        1462      366       69        0    0.000
+
+  Speedup vs baseline (small):
+    naive_llm: 0.82x
+    uadl_aware_llm: 0.82x
+
+  Speedup vs baseline (large):
+    naive_llm: 0.81x
+    uadl_aware_llm: 0.81x
+
+--- VEC_ADD ---
+Variant              Arch       Cycles   Stalls  Flushes    Insns      IPC
+------------------------------------------------------------------------------
+baseline             large        1567        0      102        0    0.000
+naive_llm            large        1292        0       52        0    0.000
+uadl_aware_llm       large        1300        0       52        0    0.000
+baseline             small        3038      529      102        0    0.000
+naive_llm            small        2432      470       52        0    0.000
+uadl_aware_llm       small        2204      402       52        0    0.000
+
+  Speedup vs baseline (small):
+    naive_llm: 1.25x
+    uadl_aware_llm: 1.38x
+
+  Speedup vs baseline (large):
+    naive_llm: 1.21x
+    uadl_aware_llm: 1.21x
+
+
+--- FIBONACCI ---
+Variant              Arch       Cycles   Stalls  Flushes    Insns      IPC
+------------------------------------------------------------------------------
+baseline             large        5120        0      710        0    0.000
+naive_llm            large         466        0       35        0    0.000
+uadl_aware_llm       large         466        0       35        0    0.000
+baseline             small        7624     1066      710        0    0.000
+naive_llm            small         590       98       35        0    0.000
+uadl_aware_llm       small         118       11        4        0    0.000
+
+   Speedup vs baseline (small):
+    naive_llm: 16.12x
+    uadl_aware_llm: 16.89x
+
+  Speedup vs baseline (large):
+    naive_llm: 13.90x
+    uadl_aware_llm: 14.47x

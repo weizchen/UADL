@@ -1,0 +1,29 @@
+# UADL Architecture: RV32I Scalar In-Order Pipeline
+#
+# This is the entry-point file that pairs an ISA with a microarchitecture.
+# The LLM reads this single file to understand the full architecture.
+
+architecture:
+  name: "RV32I_InOrder"
+  isa: "isa/rv32i.yaml"
+  microarch: "microarch/default.yaml"
+
+  # Functional units — available for LLM to modify
+  functional_units:
+    - name: "ALU"
+      operations: ["add", "sub", "and_op", "or_op", "sll", "srl", "sra", "slt"]
+      count: 1
+      latency: 1
+    - name: "MEM"
+      operations: ["load_word", "store_word"]
+      count: 1
+      latency: 1
+
+  # Cost model for architecture search scoring
+  cost_model:
+    register_cost_per_entry: 1
+    cache_cost_per_kb: 10
+    functional_unit_cost:
+      ALU: 5
+      MEM: 8
+    core_overhead: 50

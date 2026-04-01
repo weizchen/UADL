@@ -1,0 +1,98 @@
+# Architecture variant: "large" — generous resources
+# 4KB L1, 16KB L2, forwarding enabled, branch penalty 1
+# This represents a more capable processor where pipeline
+# forwarding and cache hierarchy are optimized.
+
+microarch:
+  execution_model:
+    type: "scalar"
+    cores: 2
+    threads_per_core: 1
+
+  pipeline:
+    enabled: true
+    stages:
+      - name: "fetch"
+        action: "fetch_instruction"
+        latency: 1
+      - name: "decode"
+        action: "decode_instruction"
+        latency: 1
+      - name: "execute"
+        action: "execute_alu"
+        latency: 1
+      - name: "memory"
+        action: "memory_access"
+        latency: 1
+        condition: "has_mem_access"
+      - name: "writeback"
+        action: "write_result"
+        latency: 1
+    hazards:
+      data:
+        detection: true
+        forwarding: true
+        forward_from: "execute"
+        forward_latency: 0
+      control:
+        branch_penalty: 1
+        strategy: "flush"
+
+  memory_hierarchy:
+    spaces:
+      - name: "instruction"
+        size: 16384
+        width: 8
+      - name: "data"
+        size: 16384
+        width: 8
+
+    nodes:
+      - name: "L1"
+        type: "cache"
+        size: 4096
+        line_size: 32
+        associativity: 4
+        hit_latency: 1
+        miss_penalty: 5
+
+      - name: "L2"
+        type: "cache"
+        size: 16384
+        line_size: 64
+        associativity: 8
+        hit_latency: 3
+        miss_penalty: 50
+
+    connections:
+      - from: "instruction"
+        to: "L1"
+      - from: "data"
+        to: "L1"
+      - from: "L1"
+        to: "L2"
+
+  resources:
+    cores: 1
+    caches:
+      - level: "L1"
+        size: 4096
+        line_size: 32
+        associativity: 4
+        hit_latency: 1
+        miss_penalty: 5
+      - level: "L2"
+        size: 16384
+        line_size: 64
+        associativity: 8
+        hit_latency: 3
+        miss_penalty: 50
+    memory:
+      - name: "InstructionMem"
+        size: 16384
+        width: 8
+        role: "instruction"
+      - name: "DataMem"
+        size: 16384
+        width: 8
+        role: "data"

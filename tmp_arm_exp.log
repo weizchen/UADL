@@ -1,0 +1,68 @@
+
+=== Benchmark: matmul (ISA: armv7) ===
+  Generated prompts for matmul (armv7)
+
+  Architecture: small
+    baseline: 236 cycles, stalls=20, flushes=6, code_size=? insns
+    naive_llm: 1448 cycles, stalls=201, flushes=104, code_size=? insns
+    uadl_aware_llm: 1147 cycles, stalls=84, flushes=2, code_size=? insns
+
+  Architecture: large
+    baseline: 196 cycles, stalls=0, flushes=6, code_size=? insns
+    naive_llm: 1067 cycles, stalls=0, flushes=104, code_size=? insns
+    uadl_aware_llm: 687 cycles, stalls=0, flushes=2, code_size=? insns
+
+=== Benchmark: sort (ISA: armv7) ===
+  Generated prompts for sort (armv7)
+
+  Architecture: small
+    baseline: 153 cycles, stalls=22, flushes=4, code_size=? insns
+    naive_llm: 153 cycles, stalls=22, flushes=4, code_size=? insns
+    uadl_aware_llm: 153 cycles, stalls=22, flushes=4, code_size=? insns
+
+  Architecture: large
+    baseline: 187 cycles, stalls=0, flushes=4, code_size=? insns
+    naive_llm: 187 cycles, stalls=0, flushes=4, code_size=? insns
+    uadl_aware_llm: 187 cycles, stalls=0, flushes=4, code_size=? insns
+
+Results saved to: /Users/enzoc/code/grad/UADL/src/experiments/results/experiment_armv7_20260311_134233.csv
+
+================================================================================
+PHASE C EXPERIMENT RESULTS (ARMV7)
+================================================================================
+
+--- MATMUL ---
+Variant              Arch       Cycles   Stalls  Flushes    Insns      IPC
+------------------------------------------------------------------------------
+baseline             large         196        0        6        0    0.000
+naive_llm            large        1067        0      104        0    0.000
+uadl_aware_llm       large         687        0        2        0    0.000
+baseline             small         236       20        6        0    0.000
+naive_llm            small        1448      201      104        0    0.000
+uadl_aware_llm       small        1147       84        2        0    0.000
+
+  Speedup vs baseline (small):
+    naive_llm: 0.16x
+    uadl_aware_llm: 0.21x
+
+  Speedup vs baseline (large):
+    naive_llm: 0.18x
+    uadl_aware_llm: 0.29x
+
+--- SORT ---
+Variant              Arch       Cycles   Stalls  Flushes    Insns      IPC
+------------------------------------------------------------------------------
+baseline             large         187        0        4        0    0.000
+naive_llm            large         187        0        4        0    0.000
+uadl_aware_llm       large         187        0        4        0    0.000
+baseline             small         153       22        4        0    0.000
+naive_llm            small         153       22        4        0    0.000
+uadl_aware_llm       small         153       22        4        0    0.000
+
+  Speedup vs baseline (small):
+    naive_llm: 1.00x
+    uadl_aware_llm: 1.00x
+
+  Speedup vs baseline (large):
+    naive_llm: 1.00x
+    uadl_aware_llm: 1.00x

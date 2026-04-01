@@ -1,0 +1,38 @@
+[
+  {
+    "name": "baseline",
+    "total_cycles": 708,
+    "cost": 57.5,
+    "score": 6458.0
+  },
+  {
+    "name": "Disable forwarding (save hardware cost)",
+    "total_cycles": 794,
+    "cost": 47.5,
+    "score": 5544.0
+  },
+  {
+    "name": "Branch penalty 1 (better predictor)",
+    "total_cycles": 674,
+    "cost": 57.5,
+    "score": 6424.0
+  },
+  {
+    "name": "Smaller L1 cache (128B, direct-mapped)",
+    "total_cycles": 708,
+    "cost": 56.25,
+    "score": 6333.0
+  },
+  {
+    "name": "Larger L1 cache (2048B, 4-way)",
+    "total_cycles": 708,
+    "cost": 81.0,
+    "score": 8808.0
+  },
+  {
+    "name": "Optimal: forwarding + penalty 1 + 512B 2-way L1",
+    "total_cycles": 674,
+    "cost": 62.0,
+    "score": 6874.0
+  }
+]

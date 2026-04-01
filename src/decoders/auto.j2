@@ -1,0 +1,55 @@
+{# =================================================================
+   UADL Auto Decoder Generator
+   
+   Generates a C++ instruction decoder from YAML encoding_fields.
+   This replaces hand-written per-ISA decoder templates for
+   ISAs with simple, regular encodings.
+   ================================================================= #}
+
+{% set enc = architecture.get('encoding_fields', {}) %}
+{% set fields = enc.get('fields', []) %}
+
+struct DecodedInst {
+    {% for field in fields %}
+    {% if field.get('sign_extend', false) %}
+    int32_t {{ field.name }};
+    {% else %}
+    uint32_t {{ field.name }};
+    {% endif %}
+    {% endfor %}
+};
+
+{% for field in fields %}
+// {{ field.name }}: bits [{{ field.bits[0] }}:{{ field.bits[1] }}]
+{% endfor %}
+
+DecodedInst decode(uint32_t raw) {
+    DecodedInst d;
+    {% for field in fields %}
+    {% set hi = field.bits[0] %}
+    {% set lo = field.bits[1] %}
+    {% set width = hi - lo + 1 %}
+    {% set mask = (2 ** width) - 1 %}
+    {% if field.get('sign_extend', false) %}
+    {
+        uint32_t _raw = (raw >> {{ lo }}) & {{ "0x%X" | format(mask) }};
+        // Sign extend from {{ width }} bits
+        if (_raw & {{ "0x%X" | format(2 ** (width - 1)) }}) {
+            d.{{ field.name }} = (int32_t)(_raw | {{ "0x%X" | format(((2**32) - 1) - mask) }});
+        } else {
+            d.{{ field.name }} = (int32_t)_raw;
+        }
+    }
+    {% else %}
+    d.{{ field.name }} = (raw >> {{ lo }}) & {{ "0x%X" | format(mask) }};
+    {% endif %}
+    {% endfor %}
+    return d;
+}
+
+const char* inst_name(uint32_t opcode) {
+    {% for inst in architecture.instructions %}
+    if (opcode == {{ inst.opcode }}) return "{{ inst.name }}";
+    {% endfor %}
+    return "???";
+}

@@ -1,0 +1,59 @@
+Optimize the following C code for performance. Focus on reducing execution time.
+Do not change the function signatures, memory addresses, or return values.
+The code must remain functionally equivalent.
+
+```c
+// Phase C Benchmark: Matrix multiply (4x4)
+// Baseline — straightforward triple-nested loop, no optimizations
+// Uses manual multiply (rv32i has no MUL instruction)
+
+int mul(int a, int b) {
+  int result = 0;
+  int neg = 0;
+  if (b < 0) {
+    neg = 1;
+    b = -b;
+  }
+  for (int i = 0; i < b; i++) {
+    result = result + a;
+  }
+  if (neg)
+    result = -result;
+  return result;
+}
+
+int main() {
+  volatile int *A = (volatile int *)400; // 4x4 = 16 ints
+  volatile int *B = (volatile int *)464; // 4x4 = 16 ints
+  volatile int *C = (volatile int *)528; // 4x4 result
+
+  // Initialize A = [[1,2,3,4],[5,6,7,8],[9,10,11,12],[13,14,15,16]]
+  int v = 1;
+  for (int i = 0; i < 4; i++)
+    for (int j = 0; j < 4; j++) {
+      A[mul(i, 4) + j] = v;
+      v = v + 1;
+    }
+
+  // Initialize B = identity
+  for (int i = 0; i < 4; i++)
+    for (int j = 0; j < 4; j++)
+      B[mul(i, 4) + j] = (i == j) ? 1 : 0;
+
+  // C = A * B
+  for (int i = 0; i < 4; i++) {
+    for (int j = 0; j < 4; j++) {
+      int sum = 0;
+      for (int k = 0; k < 4; k++) {
+        sum = sum + mul(A[mul(i, 4) + k], B[mul(k, 4) + j]);
+      }
+      C[mul(i, 4) + j] = sum;
+    }
+  }
+
+  return C[0]; // Should be 1
+}
+
+```
+
+Return only the optimized C code, no explanation.

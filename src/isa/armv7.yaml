@@ -12,19 +12,12 @@ isa:
     - name: "CPSR"
       width: 32
 
-  # ============================================================
-  # ARMv7 Integer Subset
-  # Condition codes are handled by the decoder, not per-instruction.
-  # Each instruction has an unconditional version; the decoder
-  # checks the condition field and skips if not met.
-  # ============================================================
-
   instructions:
 
     # --- Data Processing (register) ---
     - name: "ADD"
       format: "DP"
-      opcode: 0x4     # bits [24:21]
+      opcode: 0x4
       latency: 1
       behavior:
         - op: "add"
@@ -147,6 +140,15 @@ isa:
     - name: "MOV_IMM"
       format: "DPI"
       opcode: 0xD
+      latency: 1
+      behavior:
+        - op: "mov"
+          dst: "r[rd]"
+          src: "imm"
+
+    - name: "MOVW"
+      format: "DPI"
+      opcode: 0x8
       latency: 1
       behavior:
         - op: "mov"

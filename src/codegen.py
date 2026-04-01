@@ -63,6 +63,12 @@ def generate_behavior_cpp(behavior_list, operands, indent='            '):
             src2 = _resolve(step['src2'], operands)
             lines.append(f'{dst} = {src1} - {src2};')
             
+        elif op == 'mul':
+            dst = _resolve(step['dst'], operands)
+            src1 = _resolve(step['src1'], operands)
+            src2 = _resolve(step['src2'], operands)
+            lines.append(f'{dst} = {src1} * {src2};')
+            
         elif op == 'and_op':
             dst = _resolve(step['dst'], operands)
             src1 = _resolve(step['src1'], operands)

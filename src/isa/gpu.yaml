@@ -1,0 +1,200 @@
+isa:
+  name: "SimpleGPU"
+  encoding: "gpu"
+  word_size: 32
+  registers:
+    - name: "r"
+      count: 16
+      width: 32
+      signed: true
+
+  # ============================================================
+  # Simple GPU ISA — Fixed 32-bit encoding
+  # ============================================================
+
+  encoding_fields:
+    width: 32
+    endian: "little"
+    fields:
+      - name: "opcode"
+        bits: [31, 24]
+      - name: "rd"
+        bits: [23, 20]
+      - name: "rs1"
+        bits: [19, 16]
+      - name: "rs2"
+        bits: [15, 12]
+      - name: "imm"
+        bits: [11, 0]
+        sign_extend: true
+    dispatch:
+      - match: ["opcode"]
+
+  instructions:
+
+    # --- ALU (register-register) ---
+    - name: "VADD"
+      format: "RRR"
+      opcode: 0x01
+      latency: 4
+      behavior:
+        - op: "add"
+          dst: "r[rd]"
+          src1: "r[rs1]"
+          src2: "r[rs2]"
+
+    - name: "VSUB"
+      format: "RRR"
+      opcode: 0x02
+      latency: 4
+      behavior:
+        - op: "sub"
+          dst: "r[rd]"
+          src1: "r[rs1]"
+          src2: "r[rs2]"
+
+    - name: "VMUL"
+      format: "RRR"
+      opcode: 0x03
+      latency: 8
+      behavior:
+        - op: "mul"
+          dst: "r[rd]"
+          src1: "r[rs1]"
+          src2: "r[rs2]"
+
+    - name: "VAND"
+      format: "RRR"
+      opcode: 0x04
+      latency: 4
+      behavior:
+        - op: "and_op"
+          dst: "r[rd]"
+          src1: "r[rs1]"
+          src2: "r[rs2]"
+
+    - name: "VOR"
+      format: "RRR"
+      opcode: 0x05
+      latency: 4
+      behavior:
+        - op: "or_op"
+          dst: "r[rd]"
+          src1: "r[rs1]"
+          src2: "r[rs2]"
+
+    - name: "VSHL"
+      format: "RRR"
+      opcode: 0x06
+      latency: 4
+      behavior:
+        - op: "sll"
+          dst: "r[rd]"
+          src1: "r[rs1]"
+          src2: "r[rs2]"
+
+    - name: "VSHR"
+      format: "RRR"
+      opcode: 0x07
+      latency: 4
+      behavior:
+        - op: "srl"
+          dst: "r[rd]"
+          src1: "r[rs1]"
+          src2: "r[rs2]"
+
+    # --- ALU (register-immediate) ---
+    - name: "VADD_IMM"
+      format: "RRI"
+      opcode: 0x11
+      latency: 4
+      behavior:
+        - op: "add"
+          dst: "r[rd]"
+          src1: "r[rs1]"
+          src2: "imm"
+
+    - name: "VMUL_IMM"
+      format: "RRI"
+      opcode: 0x13
+      latency: 8
+      behavior:
+        - op: "mul"
+          dst: "r[rd]"
+          src1: "r[rs1]"
+          src2: "imm"
+
+    # --- Move immediate ---
+    - name: "VMOV_IMM"
+      format: "RI"
+      opcode: 0x20
+      latency: 4
+      behavior:
+        - op: "mov"
+          dst: "r[rd]"
+          src: "imm"
+
+    # --- Memory ---
+    - name: "LD_GLOBAL"
+      format: "MEM"
+      opcode: 0x30
+      latency: 100
+      mem_access: true
+      mem_type: "global"
+      behavior:
+        - op: "load_word"
+          dst: "r[rd]"
+          base: "r[rs1]"
+          offset: "imm"
+
+    - name: "ST_GLOBAL"
+      format: "MEM"
+      opcode: 0x31
+      latency: 100
+      mem_access: true
+      mem_type: "global"
+      behavior:
+        - op: "store_word"
+          src: "r[rd]"
+          base: "r[rs1]"
+          offset: "imm"
+
+    - name: "LD_SHARED"
+      format: "MEM"
+      opcode: 0x32
+      latency: 4
+      mem_access: true
+      mem_type: "shared"
+      behavior:
+        - op: "load_shared"
+          dst: "r[rd]"
+          base: "r[rs1]"
+          offset: "imm"
+
+    - name: "ST_SHARED"
+      format: "MEM"
+      opcode: 0x33
+      latency: 4
+      mem_access: true
+      mem_type: "shared"
+      behavior:
+        - op: "store_shared"
+          src: "r[rd]"
+          base: "r[rs1]"
+          offset: "imm"
+
+    # --- Synchronization ---
+    - name: "BAR_SYNC"
+      format: "SYNC"
+      opcode: 0x40
+      latency: 1
+      behavior:
+        - op: "barrier"
+
+    # --- Control ---
+    - name: "HALT"
+      format: "CTRL"
+      opcode: 0xFF
+      latency: 1
+      behavior:
+        - op: "ecall"

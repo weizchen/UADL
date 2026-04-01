@@ -1,0 +1,82 @@
+# Architecture variant: "small" — constrained resources
+# 256B L1 cache, no L2, forwarding disabled, branch penalty 3
+# This represents a minimal embedded processor where register pressure,
+# cache misses, and pipeline stalls are significant bottlenecks.
+
+microarch:
+  execution_model:
+    type: "scalar"
+    cores: 1
+    threads_per_core: 1
+
+  pipeline:
+    enabled: true
+    stages:
+      - name: "fetch"
+        action: "fetch_instruction"
+        latency: 1
+      - name: "decode"
+        action: "decode_instruction"
+        latency: 1
+      - name: "execute"
+        action: "execute_alu"
+        latency: 1
+      - name: "memory"
+        action: "memory_access"
+        latency: 1
+        condition: "has_mem_access"
+      - name: "writeback"
+        action: "write_result"
+        latency: 1
+    hazards:
+      data:
+        detection: true
+        forwarding: false
+        forward_from: "execute"
+        forward_latency: 0
+      control:
+        branch_penalty: 3
+        strategy: "flush"
+
+  memory_hierarchy:
+    spaces:
+      - name: "instruction"
+        size: 16384
+        width: 8
+      - name: "data"
+        size: 16384
+        width: 8
+
+    nodes:
+      - name: "L1"
+        type: "cache"
+        size: 16
+        line_size: 8
+        associativity: 1
+        hit_latency: 1
+        miss_penalty: 20
+
+    connections:
+      - from: "instruction"
+        to: "L1"
+      - from: "data"
+        to: "L1"
+
+  resources:
+    cores: 1
+    caches:
+      - level: "L1"
+        size: 256
+        line_size: 16
+        associativity: 1
+        hit_latency: 1
+        miss_penalty: 20
+    memory:
+      - name: "InstructionMem"
+        size: 16384
+        width: 8
+        role: "instruction"
+      - name: "DataMem"
+        size: 16384
+        width: 8
+        role: "data"

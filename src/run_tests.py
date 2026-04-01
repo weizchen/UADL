@@ -78,8 +78,16 @@ def check_output(test_name, stdout, expected_path):
 def build_simulator(isa):
     """Build the simulator for a given ISA."""
     isa_yaml = os.path.join(SCRIPT_DIR, 'isa', f'{isa}.yaml')
-    microarch_yaml = os.path.join(SCRIPT_DIR, 'microarch', 'default.yaml')
-    template = os.path.join(SCRIPT_DIR, 'sim_template.j2')
+    
+    # Select microarch based on ISA
+    if isa == 'gpu':
+        microarch_yaml = os.path.join(SCRIPT_DIR, 'microarch', 'gpu_simt.yaml')
+    else:
+        microarch_yaml = os.path.join(SCRIPT_DIR, 'microarch', 'default.yaml')
+    
+    # Always use the universal template
+    template = os.path.join(SCRIPT_DIR, 'sim_universal.j2')
+    
     cpp = os.path.join(SCRIPT_DIR, f'generated_sim_{isa}.cpp')
     sim = os.path.join(SCRIPT_DIR, f'sim_{isa}')
     
@@ -219,9 +227,24 @@ def run_sim(name, sim_path, bin_path, expected_path):
         return False
     return check_output(name, r.stdout, expected_path)
 
+def assemble_gpu_test(name, gpu_path, isa):
+    """Assemble a .gpu file to flat binary via gpu_assembler.py."""
+    base = gpu_path.rsplit('.', 1)[0]
+    bin_path = base + '.bin'
+    
+    r = subprocess.run(
+        f"{sys.executable} {os.path.join(SCRIPT_DIR, 'gpu_assembler.py')} {gpu_path} {bin_path}",
+        shell=True, capture_output=True, text=True
+    )
+    if r.returncode != 0:
+        print(f"FAIL {name}: GPU assembly error\n{r.stderr}")
+        return None
+    return bin_path
+
+
 def main():
     parser = argparse.ArgumentParser(description='UADL Test Runner')
-    parser.add_argument('--isa', default='rv32i', choices=['rv32i', 'armv7'])
+    parser.add_argument('--isa', default='rv32i', choices=['rv32i', 'armv7', 'gpu'])
     args = parser.parse_args()
     
     isa = args.isa
@@ -232,23 +255,32 @@ def main():
         sys.exit(1)
     
     sim = build_simulator(isa)
-    tc = get_toolchain(isa)
     
     # Discover tests
     tests = []
-    for f in sorted(os.listdir(tests_dir)):
-        if f.endswith('.c'):
-            name = f[:-2]
-            exp = os.path.join(tests_dir, f"{name}.expected")
-            if os.path.exists(exp):
-                tests.append((name, 'c', os.path.join(tests_dir, f), exp))
-        elif f.endswith('.s'):
-            name = f[:-2]
-            if os.path.exists(os.path.join(tests_dir, f"{name}.c")):
-                continue
-            exp = os.path.join(tests_dir, f"{name}.expected")
-            if os.path.exists(exp):
-                tests.append((name, 'asm', os.path.join(tests_dir, f), exp))
+    if isa == 'gpu':
+        # GPU tests: .gpu assembly files
+        for f in sorted(os.listdir(tests_dir)):
+            if f.endswith('.gpu'):
+                name = f[:-4]
+                exp = os.path.join(tests_dir, f"{name}.expected")
+                if os.path.exists(exp):
+                    tests.append((name, 'gpu', os.path.join(tests_dir, f), exp))
+    else:
+        tc = get_toolchain(isa)
+        for f in sorted(os.listdir(tests_dir)):
+            if f.endswith('.c'):
+                name = f[:-2]
+                exp = os.path.join(tests_dir, f"{name}.expected")
+                if os.path.exists(exp):
+                    tests.append((name, 'c', os.path.join(tests_dir, f), exp))
+            elif f.endswith('.s'):
+                name = f[:-2]
+                if os.path.exists(os.path.join(tests_dir, f"{name}.c")):
+                    continue
+                exp = os.path.join(tests_dir, f"{name}.expected")
+                if os.path.exists(exp):
+                    tests.append((name, 'asm', os.path.join(tests_dir, f), exp))
     
     if not tests:
         print(f"No tests found for {isa}!")
@@ -256,7 +288,9 @@ def main():
     
     passed = 0
     for name, kind, path, exp in tests:
-        if kind == 'c':
+        if kind == 'gpu':
+            bin_path = assemble_gpu_test(name, path, isa)
+        elif kind == 'c':
             bin_path = compile_c_test(name, path, isa, tc)
         else:
             bin_path = assemble_test(name, path, isa, tc)

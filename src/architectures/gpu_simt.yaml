@@ -1,0 +1,37 @@
+# UADL Architecture: Simple GPU with SIMT Execution
+#
+# Pairs GPU ISA with a 2-SM SIMT microarchitecture.
+
+architecture:
+  name: "SimpleGPU_SIMT"
+  isa: "isa/gpu.yaml"
+  microarch: "microarch/gpu_simt.yaml"
+
+  functional_units:
+    - name: "ALU"
+      operations: ["add", "sub", "mul", "and_op", "or_op", "sll", "srl"]
+      count: 1
+      latency: 4
+    - name: "MUL"
+      operations: ["mul"]
+      count: 1
+      latency: 8
+    - name: "GMEM"
+      operations: ["load_word", "store_word"]
+      count: 1
+      latency: 100
+    - name: "SMEM"
+      operations: ["load_shared", "store_shared"]
+      count: 1
+      latency: 4
+
+  cost_model:
+    register_cost_per_entry: 0.5
+    cache_cost_per_kb: 10
+    scratchpad_cost_per_kb: 5
+    functional_unit_cost:
+      ALU: 5
+      MUL: 15
+      GMEM: 8
+      SMEM: 3
+    sm_overhead: 100

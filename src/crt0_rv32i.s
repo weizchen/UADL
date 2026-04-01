@@ -4,6 +4,6 @@
 .section .text
 .globl _start
 _start:
-    li sp, 8192       # stack at top of data memory
+    li sp, 16384       # stack at top of data memory
     call main          # call user's main()
     ecall              # halt simulator

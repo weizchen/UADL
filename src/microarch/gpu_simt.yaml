@@ -1,0 +1,66 @@
+microarch:
+  execution_model:
+    type: "simt"
+    compute_units: 2           # Streaming Multiprocessors
+    warps_per_unit: 4          # Max concurrent warps per SM
+    threads_per_warp: 8        # Threads per warp (small for fast sim)
+    registers_per_thread: 16   # Scalar registers per thread
+    scheduler: "round_robin"
+
+  memory_hierarchy:
+    spaces:
+      - name: "instruction"
+        size: 16384
+        width: 8
+      - name: "global"
+        size: 65536
+        width: 8
+
+    nodes:
+      - name: "L1"
+        type: "cache"
+        size: 256
+        line_size: 16
+        associativity: 2
+        hit_latency: 1
+        miss_penalty: 10
+
+    scratchpads:
+      - name: "SharedMem"
+        size: 4096
+        latency: 4
+        scope: "compute_unit"
+
+    connections:
+      - from: "global"
+        to: "L1"
+
+    global_latency: 100
+
+  # Legacy compat
+  gpu:
+    sm_count: 2
+    warps_per_sm: 4
+    warp_size: 8
+    registers_per_thread: 16
+    scheduler: "round_robin"
+
+  resources:
+    memory:
+      - name: "GlobalMem"
+        size: 65536
+        width: 8
+        role: "global"
+        latency: 100
+      - name: "SharedMem"
+        size: 4096
+        width: 8
+        role: "shared"
+        latency: 4
+    caches:
+      - level: "L1"
+        size: 256
+        line_size: 16
+        associativity: 2
+        hit_latency: 1
+        miss_penalty: 10

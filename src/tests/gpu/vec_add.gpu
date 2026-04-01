@@ -1,0 +1,70 @@
+# Vector Addition: C[i] = A[i] + B[i]
+#
+# Memory layout:
+#   A[0..15] at address 0x1000 (pre-loaded)
+#   B[0..15] at address 0x1040 (pre-loaded)
+#   C[0..15] at address 0x1080 (results written here)
+#
+# Each thread has its global thread ID in r0.
+# r0 = thread_id (set automatically by SM init)
+
+# Compute byte offset: r1 = thread_id * 4
+VMOV_IMM  r2, 4
+VMUL      r1, r0, r2
+
+# Load A[thread_id]: r3 = GlobalMem[0x1000 + r1]
+VMOV_IMM  r4, 0x100    # base address for A (0x1000 >> 4... we need 0x1000)
+VMUL_IMM  r4, r4, 16   # r4 = 0x100 * 16 = 0x1000
+VADD      r5, r4, r1   # r5 = &A[thread_id]
+LD_GLOBAL r3, r5, 0    # r3 = A[thread_id]
+
+# Load B[thread_id]: r6 = GlobalMem[0x1040 + r1]
+VMOV_IMM  r7, 64       # offset = 0x40
+VADD      r8, r5, r7   # r8 = &A[thread_id] + 0x40 = &B[thread_id]
+LD_GLOBAL r6, r8, 0    # r6 = B[thread_id]
+
+# Compute C = A + B
+VADD      r9, r3, r6   # r9 = A[thread_id] + B[thread_id]
+
+# Store C[thread_id]: GlobalMem[0x1080 + r1] = r9
+VMOV_IMM  r10, 128     # offset = 0x80
+VADD      r11, r5, r10 # r11 = &A[thread_id] + 0x80 = &C[thread_id]
+ST_GLOBAL r9, r11, 0   # C[thread_id] = r9
+
+HALT
+
+.data
+# A[0..15] = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160}
+.word 4096 10
+.word 4100 20
+.word 4104 30
+.word 4108 40
+.word 4112 50
+.word 4116 60
+.word 4120 70
+.word 4124 80
+.word 4128 90
+.word 4132 100
+.word 4136 110
+.word 4140 120
+.word 4144 130
+.word 4148 140
+.word 4152 150
+.word 4156 160
+# B[0..15] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+.word 4160 1
+.word 4164 2
+.word 4168 3
+.word 4172 4
+.word 4176 5
+.word 4180 6
+.word 4184 7
+.word 4188 8
+.word 4192 9
+.word 4196 10
+.word 4200 11
+.word 4204 12
+.word 4208 13
+.word 4212 14
+.word 4216 15
+.word 4220 16

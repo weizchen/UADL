@@ -1,0 +1,31 @@
+# UADL Architecture: ARMv7 Scalar In-Order Pipeline
+#
+# Pairs ARMv7 ISA with a 5-stage in-order pipeline microarchitecture.
+
+architecture:
+  name: "ARMv7_InOrder"
+  isa: "isa/armv7.yaml"
+  microarch: "microarch/default.yaml"
+
+  functional_units:
+    - name: "ALU"
+      operations: ["add", "sub", "and_op", "or_op", "sll", "srl", "sra"]
+      count: 1
+      latency: 1
+    - name: "MUL"
+      operations: ["mul"]
+      count: 1
+      latency: 3
+    - name: "MEM"
+      operations: ["load_word", "store_word"]
+      count: 1
+      latency: 1
+
+  cost_model:
+    register_cost_per_entry: 1
+    cache_cost_per_kb: 10
+    functional_unit_cost:
+      ALU: 5
+      MUL: 15
+      MEM: 8
+    core_overhead: 50

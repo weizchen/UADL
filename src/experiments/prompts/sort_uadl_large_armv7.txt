@@ -1,0 +1,378 @@
+Optimize the following C code for a specific processor architecture described below.
+The code will run on a cycle-accurate simulator. Your goal is to minimize execution cycles.
+
+## Target Architecture (YAML specification)
+
+### ISA:
+```yaml
+isa:
+  name: "ARMv7"
+  encoding: "armv7"
+  word_size: 32
+  registers:
+    - name: "r"
+      count: 16
+      width: 32
+      signed: true
+    - name: "PC"
+      width: 32
+    - name: "CPSR"
+      width: 32
+
+  instructions:
+
+    # --- Data Processing (register) ---
+    - name: "ADD"
+      format: "DP"
+      opcode: 0x4
+      latency: 1
+      behavior:
+        - op: "add"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "SUB"
+      format: "DP"
+      opcode: 0x2
+      latency: 1
+      behavior:
+        - op: "sub"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "AND"
+      format: "DP"
+      opcode: 0x0
+      latency: 1
+      behavior:
+        - op: "and_op"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "ORR"
+      format: "DP"
+      opcode: 0xC
+      latency: 1
+      behavior:
+        - op: "or_op"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "EOR"
+      format: "DP"
+      opcode: 0x1
+      latency: 1
+      behavior:
+        - op: "xor_op"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "MOV"
+      format: "DP"
+      opcode: 0xD
+      latency: 1
+      behavior:
+        - op: "mov"
+          dst: "r[rd]"
+          src: "r[rm]"
+
+    - name: "CMP"
+      format: "DP"
+      opcode: 0xA
+      latency: 1
+      behavior:
+        - op: "cmp"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "LSL"
+      format: "DP"
+      opcode: 0xD
+      funct: 0x0
+      latency: 1
+      behavior:
+        - op: "sll"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "LSR"
+      format: "DP"
+      opcode: 0xD
+      funct: 0x1
+      latency: 1
+      behavior:
+        - op: "srl"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    - name: "ASR"
+      format: "DP"
+      opcode: 0xD
+      funct: 0x2
+      latency: 1
+      behavior:
+        - op: "sra"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "r[rm]"
+
+    # --- Data Processing (immediate) ---
+    - name: "ADD_IMM"
+      format: "DPI"
+      opcode: 0x4
+      latency: 1
+      behavior:
+        - op: "add"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "imm"
+
+    - name: "SUB_IMM"
+      format: "DPI"
+      opcode: 0x2
+      latency: 1
+      behavior:
+        - op: "sub"
+          dst: "r[rd]"
+          src1: "r[rn]"
+          src2: "imm"
+
+    - name: "MOV_IMM"
+      format: "DPI"
+      opcode: 0xD
+      latency: 1
+      behavior:
+        - op: "mov"
+          dst: "r[rd]"
+          src: "imm"
+
+    - name: "CMP_IMM"
+      format: "DPI"
+      opcode: 0xA
+      latency: 1
+      behavior:
+        - op: "cmp"
+          src1: "r[rn]"
+          src2: "imm"
+
+    # --- Load/Store ---
+    - name: "LDR"
+      format: "LS"
+      opcode: 0x1     # L bit = 1 (load)
+      latency: 5
+      mem_access: true
+      behavior:
+        - op: "load_word"
+          dst: "r[rd]"
+          base: "r[rn]"
+          offset: "imm"
+
+    - name: "STR"
+      format: "LS"
+      opcode: 0x0     # L bit = 0 (store)
+      latency: 5
+      mem_access: true
+      behavior:
+        - op: "store_word"
+          src: "r[rd]"
+          base: "r[rn]"
+          offset: "imm"
+
+    # --- Branch ---
+    - name: "B"
+      format: "BR"
+      opcode: 0xA
+      latency: 1
+      behavior:
+        - op: "branch"
+          offset: "imm"
+
+    - name: "BL"
+      format: "BR"
+      opcode: 0xB
+      latency: 1
+      behavior:
+        - op: "branch_link"
+          dst: "r[14]"
+          offset: "imm"
+
+    - name: "BX"
+      format: "BX"
+      latency: 1
+      behavior:
+        - op: "branch_reg"
+          base: "r[rm]"
+
+    # --- System ---
+    - name: "SVC"
+      format: "SVC"
+      latency: 1
+      behavior:
+        - op: "ecall"
+
+```
+
+### Microarchitecture:
+```yaml
+# Architecture variant: "large" — generous resources
+# 4KB L1, 16KB L2, forwarding enabled, branch penalty 1
+# This represents a more capable processor where pipeline
+# forwarding and cache hierarchy are optimized.
+
+microarch:
+  execution_model:
+    type: "scalar"
+    cores: 2
+    threads_per_core: 1
+
+  pipeline:
+    enabled: true
+    stages:
+      - name: "fetch"
+        action: "fetch_instruction"
+        latency: 1
+      - name: "decode"
+        action: "decode_instruction"
+        latency: 1
+      - name: "execute"
+        action: "execute_alu"
+        latency: 1
+      - name: "memory"
+        action: "memory_access"
+        latency: 1
+        condition: "has_mem_access"
+      - name: "writeback"
+        action: "write_result"
+        latency: 1
+    hazards:
+      data:
+        detection: true
+        forwarding: true
+        forward_from: "execute"
+        forward_latency: 0
+      control:
+        branch_penalty: 1
+        strategy: "flush"
+
+  memory_hierarchy:
+    spaces:
+      - name: "instruction"
+        size: 16384
+        width: 8
+      - name: "data"
+        size: 16384
+        width: 8
+
+    nodes:
+      - name: "L1"
+        type: "cache"
+        size: 4096
+        line_size: 32
+        associativity: 4
+        hit_latency: 1
+        miss_penalty: 5
+
+      - name: "L2"
+        type: "cache"
+        size: 16384
+        line_size: 64
+        associativity: 8
+        hit_latency: 3
+        miss_penalty: 50
+
+    connections:
+      - from: "instruction"
+        to: "L1"
+      - from: "data"
+        to: "L1"
+      - from: "L1"
+        to: "L2"
+
+  resources:
+    cores: 1
+    caches:
+      - level: "L1"
+        size: 4096
+        line_size: 32
+        associativity: 4
+        hit_latency: 1
+        miss_penalty: 5
+      - level: "L2"
+        size: 16384
+        line_size: 64
+        associativity: 8
+        hit_latency: 3
+        miss_penalty: 50
+    memory:
+      - name: "InstructionMem"
+        size: 16384
+        width: 8
+        role: "instruction"
+      - name: "DataMem"
+        size: 16384
+        width: 8
+        role: "data"
+
+```
+
+## Key Architecture Details to Consider:
+- Pipeline: 5-stage in-order
+- Data forwarding: enabled
+- Branch penalty: 1 cycles
+- L1 cache: 4096B, 32B lines, 4-way, hit=1cy, miss=5cy
+- L2 cache: 16384B, 64B lines, 8-way, hit=3cy, miss=50cy
+
+## Optimization Goals:
+1. Minimize memory accesses (use registers/locals where possible)
+2. Reduce data dependencies between consecutive instructions (avoid stalls)
+3. Minimize branch-dependent control flow
+4. Optimize memory access patterns for the cache configuration
+5. Reduce total instruction count
+
+## Code to optimize:
+```c
+// Phase C Benchmark: Insertion sort
+// Baseline — straightforward implementation, no optimizations
+// Sorts 6 integers stored in memory
+
+int main() {
+  volatile int *arr = (volatile int *)400;
+
+  // Initialize with unsorted data
+  arr[0] = 42;
+  arr[1] = 17;
+  arr[2] = 5;
+  arr[3] = 28;
+  arr[4] = 12;
+  arr[5] = 33;
+
+  int n = 6;
+
+  // Insertion sort
+  for (int i = 1; i < n; i++) {
+    int key = arr[i];
+    int j = i - 1;
+    while (j >= 0) {
+      if (arr[j] > key) {
+        arr[j + 1] = arr[j];
+        j = j - 1;
+      } else {
+        break;
+      }
+    }
+    arr[j + 1] = key;
+  }
+
+  return arr[0]; // Should be 5 (smallest element)
+}
+
+```
+
+Return only the optimized C code, no explanation. Do not change memory addresses or return values.

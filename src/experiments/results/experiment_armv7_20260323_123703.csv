@@ -1,0 +1,3 @@
+benchmark,architecture,variant,isa,cycles,stalls,flushes,instruction_count,ipc,code_size_bytes,L1_hit_rate,L1_hits,L1_misses,L2_hit_rate,L2_hits,L2_misses
+matmul,small,baseline,armv7,997,174,75,0,0.000,588,98.3%,174,3,,,
+matmul,large,baseline,armv7,679,0,75,0,0.000,588,99.4%,352,2,50.0%,1,1

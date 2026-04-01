@@ -1,0 +1,447 @@
+#include <iostream>
+#include <vector>
+#include <cstdint>
+#include <cstring>
+#include <algorithm>
+#include <cstdio>
+
+using namespace std;
+
+// --- GPU Architecture: {{ architecture.name }} ---
+
+// === Configuration (from YAML) ===
+{% set gpu = architecture.gpu %}
+static const int NUM_SMS         = {{ gpu.sm_count }};
+static const int WARPS_PER_SM    = {{ gpu.warps_per_sm }};
+static const int WARP_SIZE       = {{ gpu.warp_size }};
+static const int REGS_PER_THREAD = {{ gpu.registers_per_thread }};
+static const int TOTAL_THREADS   = NUM_SMS * WARPS_PER_SM * WARP_SIZE;
+
+{% for mem in architecture.resources.memory %}
+{% if mem.role == 'global' %}
+static const int GLOBAL_MEM_SIZE    = {{ mem.size }};
+static const int GLOBAL_MEM_LATENCY = {{ mem.latency }};
+{% elif mem.role == 'shared' %}
+static const int SHARED_MEM_SIZE    = {{ mem.size }};
+static const int SHARED_MEM_LATENCY = {{ mem.latency }};
+{% endif %}
+{% endfor %}
+
+// === Cache Hierarchy ===
+{% for cache in architecture.resources.caches %}
+struct {{ cache.level }}_Cache {
+    static const int SIZE = {{ cache.size }};
+    static const int LINE_SIZE = {{ cache.line_size }};
+    static const int ASSOCIATIVITY = {{ cache.associativity }};
+    static const int NUM_SETS = {{ cache.size // (cache.line_size * cache.associativity) }};
+    static const int HIT_LATENCY = {{ cache.hit_latency }};
+    static const int MISS_PENALTY = {{ cache.miss_penalty }};
+    
+    uint32_t tags[NUM_SETS][ASSOCIATIVITY];
+    bool valid[NUM_SETS][ASSOCIATIVITY];
+    int lru_counter[NUM_SETS][ASSOCIATIVITY];
+    int access_count, hit_count, miss_count;
+    
+    {{ cache.level }}_Cache() : access_count(0), hit_count(0), miss_count(0) {
+        memset(valid, 0, sizeof(valid));
+        memset(tags, 0, sizeof(tags));
+        memset(lru_counter, 0, sizeof(lru_counter));
+    }
+    
+    int access(uint32_t addr) {
+        access_count++;
+        uint32_t line_addr = addr / LINE_SIZE;
+        uint32_t set_idx = line_addr % NUM_SETS;
+        uint32_t tag = line_addr / NUM_SETS;
+        
+        for (int w = 0; w < ASSOCIATIVITY; w++) {
+            if (valid[set_idx][w] && tags[set_idx][w] == tag) {
+                hit_count++;
+                lru_counter[set_idx][w] = access_count;
+                return HIT_LATENCY;
+            }
+        }
+        
+        miss_count++;
+        int victim = 0;
+        int min_lru = lru_counter[set_idx][0];
+        for (int w = 0; w < ASSOCIATIVITY; w++) {
+            if (!valid[set_idx][w]) { victim = w; break; }
+            if (lru_counter[set_idx][w] < min_lru) {
+                min_lru = lru_counter[set_idx][w];
+                victim = w;
+            }
+        }
+        valid[set_idx][victim] = true;
+        tags[set_idx][victim] = tag;
+        lru_counter[set_idx][victim] = access_count;
+        return HIT_LATENCY + MISS_PENALTY;
+    }
+};
+{% endfor %}
+
+// === Global Memory ===
+vector<uint8_t> GlobalMem(GLOBAL_MEM_SIZE, 0);
+
+// === GPU Instruction Decoder ===
+{% include 'decoders/gpu.j2' %}
+
+// === Thread State ===
+struct ThreadState {
+    int32_t r[REGS_PER_THREAD];
+    
+    ThreadState() {
+        memset(r, 0, sizeof(r));
+    }
+};
+
+// === Warp State ===
+struct WarpState {
+    uint32_t PC;
+    bool active;
+    bool at_barrier;
+    ThreadState threads[WARP_SIZE];
+    int warp_id;
+    int global_warp_id;  // across all SMs
+    
+    WarpState() : PC(0), active(false), at_barrier(false), warp_id(0), global_warp_id(0) {}
+};
+
+// === SM State ===
+struct SMState {
+    int sm_id;
+    WarpState warps[WARPS_PER_SM];
+    uint8_t SharedMem[SHARED_MEM_SIZE];
+    uint64_t total_cycles;
+    int active_warps;
+    int barrier_count;
+    int next_warp;  // round-robin scheduler state
+    {% for cache in architecture.resources.caches %}
+    {{ cache.level }}_Cache cache_{{ cache.level }};
+    {% endfor %}
+    
+    int global_mem_accesses;
+    int shared_mem_accesses;
+    
+    SMState() : sm_id(0), total_cycles(0), active_warps(0), barrier_count(0),
+                next_warp(0), global_mem_accesses(0), shared_mem_accesses(0) {
+        memset(SharedMem, 0, sizeof(SharedMem));
+    }
+    
+    void init(int id, int num_active_warps, int base_warp_id) {
+        sm_id = id;
+        active_warps = min(num_active_warps, WARPS_PER_SM);
+        for (int w = 0; w < active_warps; w++) {
+            warps[w].active = true;
+            warps[w].warp_id = w;
+            warps[w].global_warp_id = base_warp_id + w;
+            // Each thread gets its global thread ID in r[0]
+            for (int t = 0; t < WARP_SIZE; t++) {
+                warps[w].threads[t].r[0] = warps[w].global_warp_id * WARP_SIZE + t;
+            }
+        }
+    }
+};
+
+// === Instruction Memory (shared across all SMs) ===
+vector<uint8_t> InstructionMem(16384, 0);
+
+// === SIMT Execution: Execute one instruction across all threads in a warp ===
+void execute_warp(SMState& sm, WarpState& warp) {
+    if (!warp.active || warp.at_barrier) return;
+    
+    // Fetch
+    uint32_t current_pc = warp.PC;
+    uint32_t raw_inst = 0;
+    if (current_pc + 4 <= InstructionMem.size()) {
+        memcpy(&raw_inst, &InstructionMem[current_pc], 4);
+    }
+    
+    // Decode (once per warp — SIMT)
+    DecodedInst d = decode(raw_inst);
+    uint32_t rd = d.rd, rs1 = d.rs1, rs2 = d.rs2;
+    int32_t imm = d.imm;
+    
+    // Advance PC
+    warp.PC += 4;
+    
+    // Check for special instructions first
+    {% for inst in architecture.instructions %}
+    {% if inst.format == 'SYNC' %}
+    if (d.opcode == {{ inst.opcode }}) {
+        // BAR_SYNC: block this warp until all warps reach barrier
+        warp.at_barrier = true;
+        sm.barrier_count++;
+        sm.total_cycles += {{ inst.latency }};
+        return;
+    }
+    {% elif inst.format == 'CTRL' %}
+    if (d.opcode == {{ inst.opcode }}) {
+        // HALT: terminate this warp
+        warp.active = false;
+        sm.total_cycles += {{ inst.latency }};
+        return;
+    }
+    {% endif %}
+    {% endfor %}
+    
+    // Execute across all threads in the warp (SIMT)
+    for (int t = 0; t < WARP_SIZE; t++) {
+        ThreadState& th = warp.threads[t];
+        
+        // Dispatch
+        {% for inst in architecture.instructions %}
+        {% if inst.format not in ['SYNC', 'CTRL'] %}
+        {% if loop.first %}if{% else %}else if{% endif %} (d.opcode == {{ inst.opcode }}) {
+            // {{ inst.name }}
+            {% if inst.get('mem_type', '') == 'shared' %}
+            // Shared memory operation
+            {% for step in inst.behavior %}
+            {% if step.op == 'load_shared' %}
+            {
+                uint32_t _addr = (uint32_t)((int32_t)th.r[rs1] + imm);
+                if (_addr + 4 <= SHARED_MEM_SIZE) {
+                    memcpy(&th.r[rd], &sm.SharedMem[_addr], 4);
+                }
+            }
+            {% elif step.op == 'store_shared' %}
+            {
+                uint32_t _addr = (uint32_t)((int32_t)th.r[rs1] + imm);
+                if (_addr + 4 <= SHARED_MEM_SIZE) {
+                    memcpy(&sm.SharedMem[_addr], &th.r[rd], 4);
+                }
+            }
+            {% endif %}
+            {% endfor %}
+            {% elif inst.get('mem_type', '') == 'global' %}
+            // Global memory operation
+            {% for step in inst.behavior %}
+            {% if step.op == 'load_word' %}
+            {
+                uint32_t _addr = (uint32_t)((int32_t)th.r[rs1] + imm);
+                if (_addr + 4 <= GLOBAL_MEM_SIZE) {
+                    memcpy(&th.r[rd], &GlobalMem[_addr], 4);
+                }
+            }
+            {% elif step.op == 'store_word' %}
+            {
+                uint32_t _addr = (uint32_t)((int32_t)th.r[rs1] + imm);
+                if (_addr + 4 <= GLOBAL_MEM_SIZE) {
+                    memcpy(&GlobalMem[_addr], &th.r[rd], 4);
+                }
+            }
+            {% endif %}
+            {% endfor %}
+            {% else %}
+            // ALU operation — per-thread
+            {% for step in inst.behavior %}
+            {% if step.op == 'add' %}
+            th.r[rd] = th.r[{{ 'rs1' if step.src1 == 'r[rs1]' else step.src1 }}] + {% if step.src2 == 'r[rs2]' %}th.r[rs2]{% elif step.src2 == 'imm' %}imm{% else %}{{ step.src2 }}{% endif %};
+            {% elif step.op == 'sub' %}
+            th.r[rd] = th.r[rs1] - th.r[rs2];
+            {% elif step.op == 'mul' %}
+            th.r[rd] = th.r[{{ 'rs1' if step.src1 == 'r[rs1]' else step.src1 }}] * {% if step.src2 == 'r[rs2]' %}th.r[rs2]{% elif step.src2 == 'imm' %}imm{% else %}{{ step.src2 }}{% endif %};
+            {% elif step.op == 'and_op' %}
+            th.r[rd] = th.r[rs1] & th.r[rs2];
+            {% elif step.op == 'or_op' %}
+            th.r[rd] = th.r[rs1] | th.r[rs2];
+            {% elif step.op == 'sll' %}
+            th.r[rd] = th.r[rs1] << (th.r[rs2] & 0x1F);
+            {% elif step.op == 'srl' %}
+            th.r[rd] = (uint32_t)th.r[rs1] >> (th.r[rs2] & 0x1F);
+            {% elif step.op == 'mov' %}
+            th.r[rd] = {% if step.src == 'imm' %}imm{% else %}th.r[{{ step.src.replace('r[','').replace(']','') }}]{% endif %};
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+        }
+        {% endif %}
+        {% endfor %}
+        else {
+            // Unknown instruction — ignore
+        }
+    }
+    
+    // Add cycle cost for this instruction (once per warp, not per thread)
+    {% for inst in architecture.instructions %}
+    {% if inst.format not in ['SYNC', 'CTRL'] %}
+    {% if loop.first %}if{% else %}else if{% endif %} (d.opcode == {{ inst.opcode }}) {
+        sm.total_cycles += {{ inst.latency }};
+        {% if inst.get('mem_type', '') == 'global' %}
+        sm.global_mem_accesses += WARP_SIZE;
+        {% elif inst.get('mem_type', '') == 'shared' %}
+        sm.shared_mem_accesses += WARP_SIZE;
+        {% endif %}
+    }
+    {% endif %}
+    {% endfor %}
+}
+
+// === SM Execution: One cycle of warp scheduling ===
+bool step_sm(SMState& sm) {
+    // Check barrier release: if all active+barrier warps have reached barrier
+    int active_count = 0;
+    int barrier_count = 0;
+    for (int w = 0; w < WARPS_PER_SM; w++) {
+        if (sm.warps[w].active) active_count++;
+        if (sm.warps[w].at_barrier) barrier_count++;
+    }
+    
+    if (barrier_count > 0 && barrier_count == active_count) {
+        // All active warps at barrier — release them all
+        for (int w = 0; w < WARPS_PER_SM; w++) {
+            if (sm.warps[w].at_barrier) {
+                sm.warps[w].at_barrier = false;
+            }
+        }
+    }
+    
+    // Round-robin warp scheduling: find next ready warp
+    for (int i = 0; i < WARPS_PER_SM; i++) {
+        int w = (sm.next_warp + i) % WARPS_PER_SM;
+        if (sm.warps[w].active && !sm.warps[w].at_barrier) {
+            execute_warp(sm, sm.warps[w]);
+            sm.next_warp = (w + 1) % WARPS_PER_SM;
+            return true;
+        }
+    }
+    
+    // No ready warps — check if any are still active (at barrier)
+    return active_count > 0;
+}
+
+// === Main ===
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        cerr << "Usage: " << argv[0] << " <kernel.mem> [num_threads]" << endl;
+        return 1;
+    }
+    
+    int num_threads = TOTAL_THREADS;
+    if (argc >= 3) {
+        num_threads = atoi(argv[2]);
+        if (num_threads <= 0) num_threads = TOTAL_THREADS;
+    }
+    
+    // Load .mem format into InstructionMem and GlobalMem
+    FILE* f = fopen(argv[1], "rb");
+    if (!f) {
+        cerr << "Error opening file " << argv[1] << endl;
+        return 1;
+    }
+    
+    char magic[4];
+    if (fread(magic, 1, 4, f) != 4 || strncmp(magic, "UADL", 4) != 0) {
+        cerr << "Invalid memory format (missing UADL magic)" << endl;
+        fclose(f);
+        return 1;
+    }
+    
+    uint32_t vaddr, size_bytes;
+    while (fread(&vaddr, 1, 4, f) == 4 && fread(&size_bytes, 1, 4, f) == 4) {
+        vector<uint8_t> buf(size_bytes);
+        if (fread(buf.data(), 1, size_bytes, f) != size_bytes) break;
+        
+        // Segment at addr 0 = instructions, others = global data
+        if (vaddr == 0) {
+            uint32_t copy_size = min(size_bytes, (uint32_t)InstructionMem.size());
+            memcpy(&InstructionMem[0], buf.data(), copy_size);
+        }
+        if (vaddr < GlobalMem.size()) {
+            uint32_t copy_size = min(size_bytes, (uint32_t)GlobalMem.size() - vaddr);
+            memcpy(&GlobalMem[vaddr], buf.data(), copy_size);
+        }
+    }
+    fclose(f);
+    
+    // Calculate warp/SM distribution
+    int total_warps = (num_threads + WARP_SIZE - 1) / WARP_SIZE;
+    int warps_per_sm = (total_warps + NUM_SMS - 1) / NUM_SMS;
+    
+    // Initialize SMs
+    vector<SMState> sms(NUM_SMS);
+    int warps_assigned = 0;
+    for (int s = 0; s < NUM_SMS; s++) {
+        int warps_for_this_sm = min(warps_per_sm, total_warps - warps_assigned);
+        if (warps_for_this_sm <= 0) warps_for_this_sm = 0;
+        sms[s].init(s, warps_for_this_sm, warps_assigned);
+        warps_assigned += warps_for_this_sm;
+    }
+    
+    // Execute kernel: step all SMs until all warps complete
+    bool any_active = true;
+    uint64_t global_cycle = 0;
+    while (any_active) {
+        any_active = false;
+        for (int s = 0; s < NUM_SMS; s++) {
+            if (step_sm(sms[s])) {
+                any_active = true;
+            }
+        }
+        global_cycle++;
+        
+        // Safety limit
+        if (global_cycle > 1000000) {
+            cerr << "Simulation exceeded 1M cycles — aborting." << endl;
+            break;
+        }
+    }
+    
+    // === Output ===
+    uint64_t max_cycles = 0;
+    int total_global_accesses = 0;
+    int total_shared_accesses = 0;
+    
+    cout << "--- Final GPU State ---" << endl;
+    cout << "Kernel: " << num_threads << " threads, "
+         << total_warps << " warps, " << NUM_SMS << " SMs" << endl;
+    cout << "Warp Size: " << WARP_SIZE << endl;
+    cout << endl;
+    
+    for (int s = 0; s < NUM_SMS; s++) {
+        cout << "[SM " << s << "]" << endl;
+        cout << "  Cycles: " << sms[s].total_cycles << endl;
+        cout << "  Global Mem Accesses: " << sms[s].global_mem_accesses << endl;
+        cout << "  Shared Mem Accesses: " << sms[s].shared_mem_accesses << endl;
+        
+        // Show first warp's thread registers (for debugging)
+        if (sms[s].active_warps > 0) {
+            cout << "  Warp 0 Thread Registers:" << endl;
+            for (int t = 0; t < min(4, WARP_SIZE); t++) {
+                cout << "    T" << t << ": ";
+                for (int r = 0; r < min(8, REGS_PER_THREAD); r++) {
+                    if (sms[s].warps[0].threads[t].r[r] != 0) {
+                        cout << "r" << r << "=" << sms[s].warps[0].threads[t].r[r] << " ";
+                    }
+                }
+                cout << endl;
+            }
+        }
+        
+        if (sms[s].total_cycles > max_cycles) max_cycles = sms[s].total_cycles;
+        total_global_accesses += sms[s].global_mem_accesses;
+        total_shared_accesses += sms[s].shared_mem_accesses;
+    }
+    
+    cout << endl;
+    cout << "--- Performance Data ---" << endl;
+    cout << "Total Workload Cycles: " << max_cycles << endl;
+    cout << "Wall Clock Cycles: " << global_cycle << endl;
+    cout << "Total Global Mem Accesses: " << total_global_accesses << endl;
+    cout << "Total Shared Mem Accesses: " << total_shared_accesses << endl;
+    
+    {% for cache in architecture.resources.caches %}
+    // Per-SM cache stats would be here in a full implementation
+    {% endfor %}
+    
+    cout << "--- Data Memory Dump ---" << endl;
+    for (int j = 0; j < min(8192, GLOBAL_MEM_SIZE); j += 4) {
+        int32_t val;
+        memcpy(&val, &GlobalMem[j], 4);
+        if (val != 0) {
+            cout << "DataMem[" << j << "]: " << val << endl;
+        }
+    }
+    
+    return 0;
+}

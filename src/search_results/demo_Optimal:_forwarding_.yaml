@@ -1,0 +1,87 @@
+microarch:
+  execution_model:
+    cores: 1
+    threads_per_core: 1
+    type: scalar
+  memory_hierarchy:
+    connections:
+    - from: instruction
+      to: L1
+    - from: data
+      to: L1
+    - from: L1
+      to: L2
+    nodes:
+    - associativity: 2
+      hit_latency: 1
+      line_size: 16
+      miss_penalty: 10
+      name: L1
+      size: 512
+      type: cache
+    - associativity: 4
+      hit_latency: 5
+      line_size: 32
+      miss_penalty: 50
+      name: L2
+      size: 1024
+      type: cache
+    spaces:
+    - name: instruction
+      size: 16384
+      width: 8
+    - name: data
+      size: 16384
+      width: 8
+  pipeline:
+    enabled: true
+    hazards:
+      control:
+        branch_penalty: 1
+        strategy: flush
+      data:
+        detection: true
+        forward_from: execute
+        forward_latency: 0
+        forwarding: true
+    stages:
+    - action: fetch_instruction
+      latency: 1
+      name: fetch
+    - action: decode_instruction
+      latency: 1
+      name: decode
+    - action: execute_alu
+      latency: 1
+      name: execute
+    - action: memory_access
+      condition: has_mem_access
+      latency: 1
+      name: memory
+    - action: write_result
+      latency: 1
+      name: writeback
+  resources:
+    caches:
+    - associativity: 2
+      hit_latency: 1
+      level: L1
+      line_size: 16
+      miss_penalty: 10
+      size: 512
+    - associativity: 4
+      hit_latency: 5
+      level: L2
+      line_size: 32
+      miss_penalty: 50
+      size: 1024
+    cores: 1
+    memory:
+    - name: InstructionMem
+      role: instruction
+      size: 16384
+      width: 8
+    - name: DataMem
+      role: data
+      size: 16384
+      width: 8

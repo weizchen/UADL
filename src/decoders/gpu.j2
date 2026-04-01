@@ -1,0 +1,53 @@
+{# GPU Decoder — included by gpu_sim_template.j2 #}
+
+// === Simple GPU Instruction Decoder ===
+// Encoding: [31:24] opcode | [23:20] rd | [19:16] rs1 | [15:12] rs2 | [11:0] imm12
+
+struct DecodedInst {
+    uint32_t opcode;
+    uint32_t rd;
+    uint32_t rs1;
+    uint32_t rs2;
+    int32_t imm;
+    uint32_t funct3;  // alias for compatibility
+    uint32_t funct7;
+};
+
+DecodedInst decode(uint32_t inst) {
+    DecodedInst d;
+    d.opcode = (inst >> 24) & 0xFF;
+    d.rd     = (inst >> 20) & 0xF;
+    d.rs1    = (inst >> 16) & 0xF;
+    d.rs2    = (inst >> 12) & 0xF;
+    
+    // Sign-extend 12-bit immediate
+    uint32_t raw_imm = inst & 0xFFF;
+    d.imm = (raw_imm & 0x800) ? (int32_t)(raw_imm | 0xFFFFF000) : (int32_t)raw_imm;
+    
+    d.funct3 = d.opcode;
+    d.funct7 = 0;
+    return d;
+}
+
+const char* inst_name_lookup(uint32_t opcode) {
+    {% for inst in architecture.instructions %}
+    if (opcode == {{ inst.opcode }}) return "{{ inst.name }}";
+    {% endfor %}
+    return "???";
+}
+
+{# Decode step — just decode, no condition codes or barrel shifter #}
+{% macro decode_step() %}
+    DecodedInst d = decode(raw_inst);
+    uint32_t rd = d.rd, rs1 = d.rs1, rs2 = d.rs2;
+    int32_t imm = d.imm;
+{% endmacro %}
+
+{# Dispatch condition for each GPU instruction #}
+{% macro dispatch_cond(inst, loop) %}
+    {% if not loop.first %}else {% endif %}if (d.opcode == {{ inst.opcode }}) {
+{% endmacro %}
+
+{# GPU has no zero register to enforce #}
+{% macro enforce_zero_reg() %}
+{% endmacro %}

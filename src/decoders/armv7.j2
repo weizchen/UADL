@@ -78,12 +78,19 @@ DecodedInst decode(uint32_t inst) {
     if ((d.type_ & 0x6) == 0x0) {
         // Data processing
         if (d.is_imm) {
-            uint32_t rotate = ((inst >> 8) & 0xF) * 2;
-            uint32_t imm8 = inst & 0xFF;
-            if (rotate == 0) {
-                d.imm = (int32_t)imm8;
+            if (d.opcode == 0x8 && d.S == 0) {
+                // MOVW (16-bit immediate: imm4 | imm12)
+                uint32_t imm4 = (inst >> 16) & 0xF;
+                uint32_t imm12 = inst & 0xFFF;
+                d.imm = (imm4 << 12) | imm12;
             } else {
-                d.imm = (int32_t)((imm8 >> rotate) | (imm8 << (32 - rotate)));
+                uint32_t rotate = ((inst >> 8) & 0xF) * 2;
+                uint32_t imm8 = inst & 0xFF;
+                if (rotate == 0) {
+                    d.imm = (int32_t)imm8;
+                } else {
+                    d.imm = (int32_t)((imm8 >> rotate) | (imm8 << (32 - rotate)));
+                }
             }
         } else {
             // Register with optional shift
@@ -185,7 +192,7 @@ const char* inst_name(uint32_t opcode, uint32_t funct3, uint32_t funct7) {
             core.pipeline_trace.push_back({"POP", core.pipeline_cycle - 1, 0});
         }
         if (pop_pc) {
-            core.pipeline_cycle += {{ architecture.pipeline.branch_penalty }};
+            core.pipeline_cycle += {{ architecture.pipeline.get('hazards', {}).get('control', {}).get('branch_penalty', architecture.pipeline.get('branch_penalty', 2)) }};
             core.flush_count++;
         }
         {% else %}
