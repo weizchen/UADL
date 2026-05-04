@@ -68,7 +68,66 @@ def generate_behavior_cpp(behavior_list, operands, indent='            '):
             src1 = _resolve(step['src1'], operands)
             src2 = _resolve(step['src2'], operands)
             lines.append(f'{dst} = {src1} * {src2};')
-            
+
+        elif op == 'mulh':
+            # signed * signed, take upper 32 bits
+            dst = _resolve(step['dst'], operands)
+            src1 = _resolve(step['src1'], operands)
+            src2 = _resolve(step['src2'], operands)
+            lines.append(
+                f'{dst} = (int32_t)(((int64_t)(int32_t){src1} * (int64_t)(int32_t){src2}) >> 32);'
+            )
+
+        elif op == 'mulhu':
+            # unsigned * unsigned, take upper 32 bits
+            dst = _resolve(step['dst'], operands)
+            src1 = _resolve(step['src1'], operands)
+            src2 = _resolve(step['src2'], operands)
+            lines.append(
+                f'{dst} = (int32_t)(((uint64_t)(uint32_t){src1} * (uint64_t)(uint32_t){src2}) >> 32);'
+            )
+
+        elif op == 'mulhsu':
+            # signed * unsigned, take upper 32 bits
+            dst = _resolve(step['dst'], operands)
+            src1 = _resolve(step['src1'], operands)
+            src2 = _resolve(step['src2'], operands)
+            lines.append(
+                f'{dst} = (int32_t)(((int64_t)(int32_t){src1} * (int64_t)(uint32_t){src2}) >> 32);'
+            )
+
+        elif op == 'div':
+            dst = _resolve(step['dst'], operands)
+            src1 = _resolve(step['src1'], operands)
+            src2 = _resolve(step['src2'], operands)
+            lines.append(
+                f'{dst} = ({src2} == 0) ? -1 : (int32_t){src1} / (int32_t){src2};'
+            )
+
+        elif op == 'divu':
+            dst = _resolve(step['dst'], operands)
+            src1 = _resolve(step['src1'], operands)
+            src2 = _resolve(step['src2'], operands)
+            lines.append(
+                f'{dst} = ({src2} == 0) ? -1 : (int32_t)((uint32_t){src1} / (uint32_t){src2});'
+            )
+
+        elif op == 'rem':
+            dst = _resolve(step['dst'], operands)
+            src1 = _resolve(step['src1'], operands)
+            src2 = _resolve(step['src2'], operands)
+            lines.append(
+                f'{dst} = ({src2} == 0) ? {src1} : (int32_t){src1} % (int32_t){src2};'
+            )
+
+        elif op == 'remu':
+            dst = _resolve(step['dst'], operands)
+            src1 = _resolve(step['src1'], operands)
+            src2 = _resolve(step['src2'], operands)
+            lines.append(
+                f'{dst} = ({src2} == 0) ? {src1} : (int32_t)((uint32_t){src1} % (uint32_t){src2});'
+            )
+
         elif op == 'and_op':
             dst = _resolve(step['dst'], operands)
             src1 = _resolve(step['src1'], operands)
@@ -132,7 +191,59 @@ def generate_behavior_cpp(behavior_list, operands, indent='            '):
             lines.append(f'{{ uint32_t _addr = (uint32_t)((int32_t){base} + {offset});')
             lines.append(f'  _mem_addr = _addr;')
             lines.append(f'  memcpy(&DataMem[_addr], &{src}, 4); }}')
-        
+
+        elif op == 'load_byte':
+            # signed byte load
+            dst = _resolve(step['dst'], operands)
+            base = _resolve(step['base'], operands)
+            offset = _resolve(step['offset'], operands)
+            lines.append(f'{{ uint32_t _addr = (uint32_t)((int32_t){base} + {offset});')
+            lines.append(f'  _mem_addr = _addr;')
+            lines.append(f'  {dst} = (int32_t)(int8_t)DataMem[_addr]; }}')
+
+        elif op == 'load_byte_unsigned':
+            dst = _resolve(step['dst'], operands)
+            base = _resolve(step['base'], operands)
+            offset = _resolve(step['offset'], operands)
+            lines.append(f'{{ uint32_t _addr = (uint32_t)((int32_t){base} + {offset});')
+            lines.append(f'  _mem_addr = _addr;')
+            lines.append(f'  {dst} = (int32_t)(uint8_t)DataMem[_addr]; }}')
+
+        elif op == 'store_byte':
+            src = _resolve(step['src'], operands)
+            base = _resolve(step['base'], operands)
+            offset = _resolve(step['offset'], operands)
+            lines.append(f'{{ uint32_t _addr = (uint32_t)((int32_t){base} + {offset});')
+            lines.append(f'  _mem_addr = _addr;')
+            lines.append(f'  DataMem[_addr] = (uint8_t)({src} & 0xFF); }}')
+
+        elif op == 'load_half':
+            dst = _resolve(step['dst'], operands)
+            base = _resolve(step['base'], operands)
+            offset = _resolve(step['offset'], operands)
+            lines.append(f'{{ uint32_t _addr = (uint32_t)((int32_t){base} + {offset});')
+            lines.append(f'  _mem_addr = _addr;')
+            lines.append(f'  uint16_t _hw; memcpy(&_hw, &DataMem[_addr], 2);')
+            lines.append(f'  {dst} = (int32_t)(int16_t)_hw; }}')
+
+        elif op == 'load_half_unsigned':
+            dst = _resolve(step['dst'], operands)
+            base = _resolve(step['base'], operands)
+            offset = _resolve(step['offset'], operands)
+            lines.append(f'{{ uint32_t _addr = (uint32_t)((int32_t){base} + {offset});')
+            lines.append(f'  _mem_addr = _addr;')
+            lines.append(f'  uint16_t _hw; memcpy(&_hw, &DataMem[_addr], 2);')
+            lines.append(f'  {dst} = (int32_t)(uint32_t)_hw; }}')
+
+        elif op == 'store_half':
+            src = _resolve(step['src'], operands)
+            base = _resolve(step['base'], operands)
+            offset = _resolve(step['offset'], operands)
+            lines.append(f'{{ uint32_t _addr = (uint32_t)((int32_t){base} + {offset});')
+            lines.append(f'  _mem_addr = _addr;')
+            lines.append(f'  uint16_t _hw = (uint16_t)({src} & 0xFFFF);')
+            lines.append(f'  memcpy(&DataMem[_addr], &_hw, 2); }}')
+
         elif op == 'branch_eq':
             src1 = _resolve(step['src1'], operands)
             src2 = _resolve(step['src2'], operands)
@@ -246,23 +357,26 @@ def analyze_behavior(behavior_list, operands):
     for step in behavior_list:
         op = step['op']
         
-        if op in ('add', 'sub', 'and_op', 'or_op', 'xor_op', 'slt', 'sltu', 'sll', 'srl', 'sra'):
+        if op in ('add', 'sub', 'mul', 'mulh', 'mulhu', 'mulhsu', 'div', 'divu',
+                  'rem', 'remu', 'and_op', 'or_op', 'xor_op',
+                  'slt', 'sltu', 'sll', 'srl', 'sra'):
             idx = _reg_index(step['dst'], operands)
             if idx is not None: dst_index = idx
             for key in ('src1', 'src2'):
                 idx = _reg_index(step.get(key, ''), operands)
                 if idx is not None and idx not in src_indices:
                     src_indices.append(idx)
-                    
-        elif op == 'load_word':
+
+        elif op in ('load_word', 'load_byte', 'load_byte_unsigned',
+                    'load_half', 'load_half_unsigned'):
             is_load = True
             idx = _reg_index(step['dst'], operands)
             if idx is not None: dst_index = idx
             idx = _reg_index(step.get('base', ''), operands)
             if idx is not None and idx not in src_indices:
                 src_indices.append(idx)
-                
-        elif op == 'store_word':
+
+        elif op in ('store_word', 'store_byte', 'store_half'):
             idx = _reg_index(step.get('src', ''), operands)
             if idx is not None and idx not in src_indices:
                 src_indices.append(idx)

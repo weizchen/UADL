@@ -1,2 +1,0 @@
-benchmark,architecture,variant,cycles,stalls,flushes,instruction_count,ipc,code_size_bytes,L1_hit_rate,L1_hits,L1_misses
-sort,small,baseline,2095,567,103,0,0.000,424,98.7%,375,5
