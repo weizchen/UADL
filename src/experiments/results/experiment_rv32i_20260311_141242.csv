@@ -1,7 +1,0 @@
-benchmark,architecture,variant,isa,cycles,stalls,flushes,instruction_count,ipc,code_size_bytes,L1_hit_rate,L1_hits,L1_misses,L2_hit_rate,L2_hits,L2_misses
-fibonacci,small,baseline,rv32i,9847,1596,710,0,0.000,212,98.6%,1841,26,,,
-fibonacci,small,naive_llm,rv32i,611,103,35,0,0.000,272,96.7%,119,4,,,
-fibonacci,small,uadl_aware_llm,rv32i,611,103,35,0,0.000,272,96.7%,119,4,,,
-fibonacci,large,baseline,rv32i,6699,0,710,0,0.000,212,99.7%,3723,11,45.5%,5,6
-fibonacci,large,naive_llm,rv32i,482,0,35,0,0.000,272,98.8%,243,3,33.3%,1,2
-fibonacci,large,uadl_aware_llm,rv32i,482,0,35,0,0.000,272,98.8%,243,3,33.3%,1,2

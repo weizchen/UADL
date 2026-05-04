@@ -1,7 +1,0 @@
-benchmark,architecture,variant,isa,cycles,stalls,flushes,instruction_count,ipc,code_size_bytes,L1_hit_rate,L1_hits,L1_misses,L2_hit_rate,L2_hits,L2_misses
-matmul,small,baseline,armv7,5935,872,436,0,0.000,600,99.6%,1221,5,,,
-matmul,small,naive_llm,armv7,4276,533,122,0,0.000,472,90.2%,655,71,,,
-matmul,small,uadl_aware_llm,armv7,4489,551,122,0,0.000,504,91.4%,752,71,,,
-matmul,large,baseline,armv7,4215,0,436,0,0.000,600,99.9%,2449,3,33.3%,1,2
-matmul,large,naive_llm,armv7,2327,0,122,0,0.000,472,99.6%,1446,6,33.3%,2,4
-matmul,large,uadl_aware_llm,armv7,2490,0,122,0,0.000,500,99.6%,1608,6,33.3%,2,4

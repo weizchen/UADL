@@ -1,7 +1,0 @@
-benchmark,architecture,variant,isa,cycles,stalls,flushes,instruction_count,ipc,code_size_bytes,L1_hit_rate,L1_hits,L1_misses,L2_hit_rate,L2_hits,L2_misses
-vec_add,small,baseline,rv32i,3038,529,102,0,0.000,316,86.3%,333,53,,,
-vec_add,small,naive_llm,rv32i,2204,402,52,0,0.000,260,89.7%,315,36,,,
-vec_add,small,uadl_aware_llm,rv32i,2982,530,30,0,0.000,708,80.7%,289,69,,,
-vec_add,large,baseline,rv32i,1567,0,102,0,0.000,316,98.8%,763,9,44.4%,4,5
-vec_add,large,naive_llm,rv32i,1300,0,52,0,0.000,260,98.7%,693,9,44.4%,4,5
-vec_add,large,uadl_aware_llm,rv32i,1296,0,52,0,0.000,248,98.7%,691,9,44.4%,4,5

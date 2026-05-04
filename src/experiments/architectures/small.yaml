@@ -50,8 +50,8 @@ microarch:
     nodes:
       - name: "L1"
         type: "cache"
-        size: 16
-        line_size: 8
+        size: 256
+        line_size: 16
         associativity: 1
         hit_latency: 1
         miss_penalty: 20

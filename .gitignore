@@ -17,7 +17,19 @@ poc/sim
 poc/sim.dSYM/
 src/generated_sim_*.cpp
 src/sim_*
+!src/sim_universal.j2
 !src/sim_template.j2
+!src/gpu_sim_template.j2
+
+# Phase C/D experiment outputs (regenerated on every run)
+src/experiments/results/feedback/
+src/experiments/results/experiment_*.csv
+src/experiments/results/latest_results*.json
+src/experiments/results/tmp_*
+src/experiments/prompts/
+*.telem.json
+*.symtab.json
+tmp_arm_exp.log
 
 # Assembled binaries
 poc/tests/*.bin

@@ -1,5 +1,5 @@
 isa:
-  name: "RV32I"
+  name: "RV32IM"
   encoding: "riscv32"
   word_size: 32
   registers:
@@ -441,6 +441,103 @@ isa:
           dst: "x[rd]"
           base: "x[rs1]"
           offset: "imm"
+
+    # --- M Extension: Multiply / Divide ---
+    - name: "MUL"
+      format: "R"
+      opcode: 0x33
+      funct3: 0x0
+      funct7: 0x01
+      latency: 3
+      behavior:
+        - op: "mul"
+          dst: "x[rd]"
+          src1: "x[rs1]"
+          src2: "x[rs2]"
+
+    - name: "MULH"
+      format: "R"
+      opcode: 0x33
+      funct3: 0x1
+      funct7: 0x01
+      latency: 3
+      behavior:
+        - op: "mulh"
+          dst: "x[rd]"
+          src1: "x[rs1]"
+          src2: "x[rs2]"
+
+    - name: "MULHSU"
+      format: "R"
+      opcode: 0x33
+      funct3: 0x2
+      funct7: 0x01
+      latency: 3
+      behavior:
+        - op: "mulhsu"
+          dst: "x[rd]"
+          src1: "x[rs1]"
+          src2: "x[rs2]"
+
+    - name: "MULHU"
+      format: "R"
+      opcode: 0x33
+      funct3: 0x3
+      funct7: 0x01
+      latency: 3
+      behavior:
+        - op: "mulhu"
+          dst: "x[rd]"
+          src1: "x[rs1]"
+          src2: "x[rs2]"
+
+    - name: "DIV"
+      format: "R"
+      opcode: 0x33
+      funct3: 0x4
+      funct7: 0x01
+      latency: 32
+      behavior:
+        - op: "div"
+          dst: "x[rd]"
+          src1: "x[rs1]"
+          src2: "x[rs2]"
+
+    - name: "DIVU"
+      format: "R"
+      opcode: 0x33
+      funct3: 0x5
+      funct7: 0x01
+      latency: 32
+      behavior:
+        - op: "divu"
+          dst: "x[rd]"
+          src1: "x[rs1]"
+          src2: "x[rs2]"
+
+    - name: "REM"
+      format: "R"
+      opcode: 0x33
+      funct3: 0x6
+      funct7: 0x01
+      latency: 32
+      behavior:
+        - op: "rem"
+          dst: "x[rd]"
+          src1: "x[rs1]"
+          src2: "x[rs2]"
+
+    - name: "REMU"
+      format: "R"
+      opcode: 0x33
+      funct3: 0x7
+      funct7: 0x01
+      latency: 32
+      behavior:
+        - op: "remu"
+          dst: "x[rd]"
+          src1: "x[rs1]"
+          src2: "x[rs2]"
 
     # --- System ---
     - name: "ECALL"

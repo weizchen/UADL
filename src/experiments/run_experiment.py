@@ -43,18 +43,26 @@ ARCHITECTURES = ['small', 'large']
 VARIANTS = ['baseline', 'naive_llm', 'uadl_aware_llm']
 
 def find_llvm_tool(name):
-    """Find LLVM tool in PATH or Homebrew."""
+    """Find LLVM tool, preferring Homebrew over Apple's stub clang.
+
+    Apple's /usr/bin/clang lacks cross-compile backends (riscv32, arm-none-eabi)
+    and lld, so we must check Homebrew kegs first.
+    """
     import shutil
+    # Homebrew prefixes: ARM (/opt/homebrew) and Intel (/usr/local).
+    # `lld` is its own keg, so check both llvm/ and lld/ subtrees.
+    for prefix in ('/opt/homebrew', '/usr/local'):
+        for keg in ('llvm', 'lld'):
+            candidate = f'{prefix}/opt/{keg}/bin/{name}'
+            if os.path.exists(candidate):
+                return candidate
     tool = shutil.which(name)
     if tool:
         return tool
-    for v in range(20, 12, -1):
+    for v in range(22, 12, -1):
         tool = shutil.which(f'{name}-{v}')
         if tool:
             return tool
-    brew_path = f'/opt/homebrew/opt/llvm/bin/{name}'
-    if os.path.exists(brew_path):
-        return brew_path
     return name
 
 def parse_sim_output(output):
@@ -63,30 +71,41 @@ def parse_sim_output(output):
         'cycles': 0,
         'stalls': 0,
         'flushes': 0,
+        'instruction_count': 0,
         'cache_hits': {},
         'cache_misses': {},
         'cache_hit_rate': {},
         'ipc': 0.0,
         'data_mem': {},
     }
-    
+
     for line in output.split('\n'):
         line = line.strip()
-        
+
         # Cycle count
         m = re.search(r'Total (?:Workload )?Cycles:\s*(\d+)', line)
         if m:
             metrics['cycles'] = int(m.group(1))
-        
+
         # Pipeline stalls
         m = re.search(r'Pipeline Stalls:\s*(\d+)', line)
         if m:
             metrics['stalls'] = int(m.group(1))
-        
+
         # Pipeline flushes
         m = re.search(r'Pipeline Flushes:\s*(\d+)', line)
         if m:
             metrics['flushes'] = int(m.group(1))
+
+        # Instruction count (workload-wide)
+        m = re.search(r'Total Instructions:\s*(\d+)', line)
+        if m:
+            metrics['instruction_count'] = int(m.group(1))
+
+        # IPC
+        m = re.search(r'^IPC:\s*([\d.]+)', line)
+        if m:
+            metrics['ipc'] = float(m.group(1))
         
         # Cache stats
         m = re.search(r'(\w+) Cache:\s*(\d+)\s*hits,\s*(\d+)\s*misses\s*\(([\d.]+)%', line)
@@ -104,16 +123,23 @@ def parse_sim_output(output):
     return metrics
 
 
-def compile_and_run(c_file, microarch_yaml, isa='rv32i'):
-    """Compile a C file and run it on the given architecture. Returns metrics dict."""
+def compile_and_run(c_file, microarch_yaml, isa='rv32i', opt_flag='-O0', work_dir=None):
+    """Compile a C file and run it on the given architecture. Returns metrics dict.
+
+    `opt_flag` is the -O level passed to clang (default -O0).
+    `work_dir` overrides where intermediate .cpp/.bin/.elf files are written
+    (default: RESULTS_DIR). Use a per-run dir to avoid collisions when running
+    multiple feedback iterations in parallel.
+    """
     
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    
+    out_dir = work_dir or RESULTS_DIR
+    os.makedirs(out_dir, exist_ok=True)
+
     # Step 1: Build simulator for this architecture
     isa_yaml = os.path.join(SRC_DIR, 'isa', f'{isa}.yaml')
     template = os.path.join(SRC_DIR, 'sim_universal.j2')
-    cpp_out = os.path.join(RESULTS_DIR, 'tmp_sim.cpp')
-    sim_out = os.path.join(RESULTS_DIR, 'tmp_sim')
+    cpp_out = os.path.join(out_dir, 'tmp_sim.cpp')
+    sim_out = os.path.join(out_dir, 'tmp_sim')
     
     result = subprocess.run(
         ['python', os.path.join(SRC_DIR, 'uadl_compiler.py'),
@@ -138,6 +164,12 @@ def compile_and_run(c_file, microarch_yaml, isa='rv32i'):
         crt0 = os.path.join(SRC_DIR, 'crt0_rv32i.s')
         clang_target = '--target=riscv32 -march=rv32i -mabi=ilp32'
         ld_cmd = f'{lld} -m elf32lriscv --image-base=0'
+    elif isa == 'rv32im':
+        # Same crt0 (the __mulsi3 helper is harmless dead code when MUL is
+        # available; clang will emit native MUL and never call it).
+        crt0 = os.path.join(SRC_DIR, 'crt0_rv32i.s')
+        clang_target = '--target=riscv32 -march=rv32im -mabi=ilp32'
+        ld_cmd = f'{lld} -m elf32lriscv --image-base=0'
     elif isa == 'armv7':
         crt0 = os.path.join(SRC_DIR, 'crt0_armv7.s')
         clang_target = '--target=armv7-none-eabi -mcpu=cortex-a9'
@@ -145,7 +177,7 @@ def compile_and_run(c_file, microarch_yaml, isa='rv32i'):
     else:
         return {'error': f'Unsupported ISA for experiment runner: {isa}'}
     
-    base = os.path.join(RESULTS_DIR, 'tmp_test')
+    base = os.path.join(out_dir, 'tmp_test')
     obj = base + '.o'
     crt0_o = base + '_crt0.o'
     elf = base + '.elf'
@@ -159,9 +191,9 @@ def compile_and_run(c_file, microarch_yaml, isa='rv32i'):
     if r.returncode != 0:
         return {'error': f'crt0 failed: {r.stderr}'}
     
-    # Compile C (with -O0 for baseline, to keep it unoptimized)
+    # Compile C; -g embeds DWARF for per-PC source-line telemetry (used in Phase D).
     r = subprocess.run(
-        f'{clang} {clang_target} -c -O0 -fno-builtin -nostdlib -o {obj} {c_file}',
+        f'{clang} {clang_target} -c {opt_flag} -g -fno-builtin -nostdlib -o {obj} {c_file}',
         shell=True, capture_output=True, text=True
     )
     if r.returncode != 0:
@@ -207,7 +239,11 @@ def compile_and_run(c_file, microarch_yaml, isa='rv32i'):
         metrics['code_size_bytes'] = bin_size
     except:
         metrics['code_size_bytes'] = 0
-    
+
+    # Sidecar paths for Phase D
+    metrics['bin_path'] = bin_path
+    metrics['symtab_path'] = bin_path + '.symtab.json'
+    metrics['telemetry_path'] = bin_path + '.telem.json'
     return metrics
 
 
@@ -329,11 +365,10 @@ def run_experiment(benchmark, arch_name, variant, isa='rv32i'):
     return metrics
 
 
-from google import genai
-
 def call_llm_api(prompt):
     """Call Google Gemini API using official SDK. Returns C code."""
     try:
+        from google import genai
         client = genai.Client() # Automatically uses GEMINI_API_KEY env var
         response = client.models.generate_content(
             model="gemini-3.1-flash-lite-preview",
